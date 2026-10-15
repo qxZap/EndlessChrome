@@ -53,6 +53,9 @@ Back up `data/` and you've backed up every profile.
 
 ## Configuration
 
+Copy `.env.example` to `.env` next to `endlesschrome.py` and edit it, or set the same names as environment variables
+(those win over `.env`).
+
 | Env var | Default | What it does |
 |---|---|---|
 | `ENDLESS_PORT` | `8790` | Dashboard port |

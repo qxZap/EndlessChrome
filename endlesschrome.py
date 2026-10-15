@@ -12,6 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DIR = Path(__file__).resolve().parent
+if (DIR / ".env").exists():  # KEY=VALUE lines; real environment variables win
+    for line in (DIR / ".env").read_text("utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not key.strip().startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 DATA = Path(os.environ.get("ENDLESS_DATA", DIR / "data")).resolve()
 PROFILES, SHARED = DATA / "profiles", DATA / "shared"
 KINDS = {  # what a profile runs: same Selkies viewer, /config home and SUBFOLDER support in both images
