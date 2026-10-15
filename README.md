@@ -6,7 +6,9 @@ Each **profile** is its own Chromium in a lightweight Docker container (~400 MB 
 cookies, extensions and history. Every profile installs as its **own app**, with its own name, colour
 and icon in your taskbar or dock.
 
-<!-- Launch video goes here once v1 is validated. -->
+[![EndlessChrome in 22 seconds](media/endlesschrome.jpg)](media/endlesschrome.mp4)
+
+*Click to watch the 22-second tour.*
 
 ## Features
 
