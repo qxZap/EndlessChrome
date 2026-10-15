@@ -21,6 +21,7 @@ LOCAL = BIND in ("127.0.0.1", "localhost")
 PASSWORD = os.environ.get("ENDLESS_PASSWORD", "")
 FIRST_PORT = 23100
 FOLDERS = ("Downloads", "Documents", "Shared")
+ICON_SIZES = ("48", "192", "512")  # favicon, app icon, splash/store icon
 PALETTE = ["#4f7cff", "#ff6b4f", "#22b07d", "#b55cff", "#ffb020", "#ff4f9a", "#14a8c4", "#7a8b99"]
 lock = threading.Lock()
 
@@ -119,6 +120,11 @@ def create(name, color=None, clone_of=None):
         p = {"id": pid, "name": name, "color": color or random.choice(PALETTE), "created": time.time(),
              "ports": {"view": view, "https": https, "cdp": cdp}}
         if clone_of:
+            src = load(clone_of)
+            if src.get("icon"):
+                for s in ICON_SIZES:
+                    shutil.copy(PROFILES / clone_of / f"icon-{s}.png", root / f"icon-{s}.png")
+                p["icon"] = src["icon"]
             was_running = clone_of in running_ids()
             stop(clone_of)  # copy a closed profile, not one Chromium is writing to
             try:
@@ -171,11 +177,42 @@ def icon_svg(p):
             f'font-weight="700" font-size="220" fill="#fff">{html.escape(initials(p["name"]))}</text></svg>')
 
 
+def icon_url(p, size):
+    return f"/p/{p['id']}/icon-{size}.png?v={p['icon']}" if p.get("icon") else f"/p/{p['id']}/icon.svg"
+
+
+def valid_png(data):
+    return data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) < 3_000_000
+
+
+def set_icon(pid, pngs):
+    """pngs: {"48"|"192"|"512": base64 PNG}, already resized by the dashboard."""
+    files = {s: base64.b64decode(pngs.get(s, ""), validate=True) for s in ICON_SIZES}
+    if not all(map(valid_png, files.values())):
+        raise ValueError("icon must be PNGs at 48, 192 and 512 px")
+    for s, data in files.items():
+        (PROFILES / pid / f"icon-{s}.png").write_bytes(data)
+    p = load(pid)
+    p["icon"] = int(time.time())
+    save(p)
+    return p
+
+
+def clear_icon(pid):
+    for s in ICON_SIZES:
+        (PROFILES / pid / f"icon-{s}.png").unlink(missing_ok=True)
+    p = load(pid)
+    p.pop("icon", None)
+    save(p)
+    return p
+
+
 def manifest(p):
     base = f"/p/{p['id']}/"
+    icons = ([{"src": icon_url(p, s), "sizes": f"{s}x{s}", "type": "image/png", "purpose": "any"} for s in ("192", "512")]
+             if p.get("icon") else [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}])
     return {"id": base, "name": p["name"], "short_name": p["name"][:12], "start_url": base, "scope": base,
-            "display": "standalone", "background_color": "#0e0f13", "theme_color": p["color"],
-            "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]}
+            "display": "standalone", "background_color": "#0e0f13", "theme_color": p["color"], "icons": icons}
 
 
 # ---------- HTTP ----------
@@ -232,15 +269,20 @@ class Handler(BaseHTTPRequestHandler):
         if m and (PROFILES / m[1] / "profile.json").exists():
             p = load(m[1])
             return self.send(200, {**p, "local": LOCAL, "running": m[1] in running_ids(), "ready": ready(p)})
-        m = re.fullmatch(r"/p/(\w+)/(|manifest\.webmanifest|icon\.svg)", path)
+        m = re.fullmatch(r"/p/(\w+)/(|manifest\.webmanifest|icon\.svg|icon-(48|192|512)\.png)", path)
         if m and (PROFILES / m[1] / "profile.json").exists():
             p = load(m[1])
+            if m[3]:
+                f = PROFILES / m[1] / f"icon-{m[3]}.png"
+                return self.send(200, f.read_bytes(), "image/png") if f.exists() else self.send(404, {"error": "no icon"})
             if m[2] == "icon.svg":
                 return self.send(200, icon_svg(p), "image/svg+xml")
             if m[2]:
                 return self.send(200, manifest(p), "application/manifest+json")
             page = (DIR / "static" / "app.html").read_text("utf-8")
-            page = page.replace("{{ID}}", p["id"]).replace("{{NAME}}", html.escape(p["name"])).replace("{{COLOR}}", html.escape(p["color"]))
+            for k, v in {"ID": p["id"], "NAME": p["name"], "COLOR": p["color"],
+                         "ICON": icon_url(p, "192"), "FAVICON": icon_url(p, "48")}.items():
+                page = page.replace("{{%s}}" % k, html.escape(v))
             return self.send(200, page, "text/html; charset=utf-8")
         self.send(404, {"error": "not found"})
 
@@ -258,6 +300,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "no such profile"})
                 color = b.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get("color", ""))) else None
                 return self.send(201, create(name, color, clone_of))
+            m = re.fullmatch(r"/api/profiles/(\w+)/icon", self.path)
+            if m and (PROFILES / m[1] / "profile.json").exists():
+                try:
+                    return self.send(200, set_icon(m[1], self.body()))
+                except ValueError as e:  # binascii.Error is a ValueError too
+                    return self.send(400, {"error": str(e)})
             m = re.fullmatch(r"/api/profiles/(\w+)/(start|stop|folder/(\w+))", self.path)
             if not m or not (PROFILES / m[1] / "profile.json").exists():
                 return self.send(404, {"error": "not found"})
@@ -291,9 +339,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self.guard():
             return
-        m = re.fullmatch(r"/api/profiles/(\w+)", self.path)
+        m = re.fullmatch(r"/api/profiles/(\w+)(/icon)?", self.path)
         if not m or not (PROFILES / m[1] / "profile.json").exists():
             return self.send(404, {"error": "not found"})
+        if m[2]:
+            return self.send(200, clear_icon(m[1]))
         try:
             delete(m[1])
             self.send(200, {"ok": True})
@@ -308,6 +358,8 @@ def selftest():
     assert "<script>" not in icon_svg(p)  # color/name can't inject markup
     m = manifest(p)
     assert m["scope"] == m["start_url"] == m["id"] == "/p/abc/"
+    assert manifest({**p, "icon": 7})["icons"][1]["src"] == "/p/abc/icon-512.png?v=7"
+    assert valid_png(b"\x89PNG\r\n\x1a\n...") and not valid_png(b"<svg onload=x>")
     LOCAL = True
     assert host_ok("localhost:8790") and host_ok("127.0.0.1:8790") and not host_ok("evil.com:8790")
     a = alloc_ports(3)

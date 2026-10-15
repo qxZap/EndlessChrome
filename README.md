@@ -10,7 +10,8 @@ and icon in your taskbar or dock.
 
 ## Features
 
-- **Create, clone, rename, recolour, start, stop and delete** profiles from the dashboard.
+- **Create, clone, rename, recolour, start, stop and delete** profiles from the dashboard (the ⚙ menu on each card).
+- **Custom icons:** upload any image. It is cropped square and converted in your browser to a 48 px favicon and 192/512 px app icons. Without an image, a letter icon in the profile colour is generated.
 - **One app per profile:** open a profile and install it from Chrome's address bar. It gets its own window and icon.
 - **Real folders on your disk:** each profile's `Downloads` and `Documents` are ordinary folders on your computer,
   and a `Shared` folder is mounted into every profile.

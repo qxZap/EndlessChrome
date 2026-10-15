@@ -7,11 +7,13 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f7cff'/%3E%3Cpath d='M18 32c0-7 6-12 14-12s14 5 14 12-6 12-14 12' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg: #f5f6f8; --card: #fff; --text: #16181d; --muted: #6b7180; --line: #e3e5ea;
-    --accent: #4f7cff; --danger: #e5484d; --ok: #22b07d; --shadow: 0 1px 2px #0000000d, 0 4px 16px #00000008;
+    --bg: #f5f6f8; --card: #fff; --raise: #f0f2f5; --text: #16181d; --muted: #6b7180; --line: #e3e5ea;
+    --accent: #4f7cff; --danger: #e5484d; --ok: #22b07d; --folder: #f2b33d;
+    --shadow: 0 1px 2px #0000000d, 0 4px 16px #00000008; --menu-shadow: 0 8px 30px #0000001f;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #0e0f13; --card: #17191f; --text: #e8eaf0; --muted: #8b91a0; --line: #262a33; --shadow: none; }
+    :root { --bg: #0e0f13; --card: #17191f; --raise: #1f222a; --text: #e8eaf0; --muted: #8b91a0; --line: #262a33;
+            --shadow: none; --menu-shadow: 0 8px 30px #00000080; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
@@ -20,32 +22,55 @@
   .sub { color: var(--muted); font-size: 14px; }
   header .grow { flex: 1; }
   main { max-width: 1200px; margin: auto; padding: 0 24px 40px; display: grid; gap: 16px;
-         grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr)); }
+         grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
   button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
            border-radius: 9px; padding: 7px 12px; cursor: pointer; }
   button:hover { border-color: var(--muted); }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.danger { color: var(--danger); }
   button:disabled { opacity: .5; cursor: progress; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  svg.i { width: 18px; height: 18px; display: block; }
+
+  .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
           box-shadow: var(--shadow); display: grid; gap: 14px; }
   .top { display: flex; gap: 12px; align-items: center; }
-  .top img { width: 44px; height: 44px; }
+  .avatar { width: 46px; height: 46px; border-radius: 11px; object-fit: cover; flex: none; }
+  .who { min-width: 0; flex: 1; }
   .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .on .dot { background: var(--ok); }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .row button { padding: 5px 10px; font-size: 13px; }
+  .gear { padding: 7px; border-color: transparent; background: transparent; color: var(--muted); }
+  .gear:hover, .gear[aria-expanded=true] { background: var(--raise); color: var(--text); border-color: transparent; }
+  .open { width: 100%; padding: 9px; font-weight: 600; }
+
+  .menu { position: absolute; top: 58px; right: 12px; z-index: 5; min-width: 170px; padding: 6px; display: grid;
+          background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--menu-shadow); }
+  .menu button { border: 0; background: none; text-align: left; padding: 8px 10px; border-radius: 8px;
+                 display: flex; gap: 10px; align-items: center; }
+  .menu button:hover, .menu button:focus-visible { background: var(--raise); outline: none; }
+  .menu .danger { color: var(--danger); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+
+  .folders-label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .folders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .folder { display: grid; justify-items: center; gap: 4px; padding: 10px 4px 8px; background: var(--raise);
+            border-color: transparent; font-size: 13px; }
+  .folder:hover { border-color: var(--line); }
+  .folder svg { width: 30px; height: 30px; color: var(--folder); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: -6px; }
+
   .empty { grid-column: 1 / -1; text-align: center; padding: 70px 20px; color: var(--muted); }
-  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); padding: 20px; width: min(380px, 92vw); }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); padding: 20px; width: min(400px, 92vw); }
   dialog::backdrop { background: #0008; }
   dialog form { display: grid; gap: 14px; }
   dialog h2 { margin: 0; font-size: 17px; }
-  label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  label, .field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
   input[type=text] { font: inherit; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
   input[type=color] { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding: 2px; }
+  .icon-row { display: flex; align-items: center; gap: 12px; }
+  .icon-row img { width: 56px; height: 56px; border-radius: 13px; object-fit: cover; }
+  .icon-row button { font-size: 13px; padding: 6px 10px; }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
   #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
            padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
@@ -69,15 +94,38 @@
     <h2 id="dlg-title"></h2>
     <label>Name <input type="text" id="f-name" required maxlength="60" autocomplete="off"></label>
     <label>Colour <input type="color" id="f-color"></label>
+    <div class="field" id="f-icon-field">Icon
+      <div class="icon-row">
+        <img id="f-preview" alt="Icon preview">
+        <button type="button" id="f-upload">Upload image…</button>
+        <button type="button" id="f-remove">Use letters</button>
+        <input type="file" id="f-file" accept="image/*" hidden>
+      </div>
+    </div>
     <div class="actions"><button value="cancel" formnovalidate>Cancel</button><button class="primary" value="ok" id="f-ok"></button></div>
   </form>
 </dialog>
 <div id="toast" role="status"></div>
 
 <script>
-const grid = document.getElementById("grid"), dlg = document.getElementById("dlg");
-const toastEl = document.getElementById("toast");
-let profiles = [], busy = new Set();
+const ICONS = {
+  gear: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>',
+  play: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 4l13 8-13 8z"/></svg>',
+  stop: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>',
+  edit: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  clone: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>',
+  trash: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
+};
+const FOLDER_HELP = {
+  Downloads: "This profile's downloads, as a normal folder on this computer",
+  Documents: "This profile's Documents folder, as a normal folder on this computer",
+  Shared: "One folder shared by every profile, handy for moving files between them",
+};
+const grid = document.getElementById("grid"), dlg = document.getElementById("dlg"), toastEl = document.getElementById("toast");
+let profiles = [], busy = new Set(), openMenu = null;
+
+const iconUrl = p => p.icon ? `/p/${p.id}/icon-192.png?v=${p.icon}` : `/p/${p.id}/icon.svg`;
 
 function toast(text) {
   toastEl.textContent = text; toastEl.classList.add("show");
@@ -114,39 +162,42 @@ function card(p) {
   el.className = "card";
   el.innerHTML = `
     <div class="top">
-      <img src="/p/${p.id}/icon.svg" alt="">
-      <div style="min-width:0">
+      <img class="avatar" src="${iconUrl(p)}" alt="">
+      <div class="who">
         <div class="name"></div>
         <div class="status ${p.running ? "on" : ""}"><span class="dot"></span>${b ? "Working…" : p.running ? "Running" : "Stopped"}</div>
       </div>
+      <button class="gear" aria-label="Profile settings" aria-haspopup="menu" aria-expanded="${openMenu === p.id}">${ICONS.gear}</button>
     </div>
-    <div class="row">
-      <button class="primary" data-a="open">Open</button>
-      <button data-a="${p.running ? "stop" : "start"}">${p.running ? "Stop" : "Start"}</button>
-      <button data-a="edit">Edit</button>
-      <button data-a="clone">Clone</button>
-      <button class="danger" data-a="delete">Delete</button>
-    </div>
-    <div class="row">
-      <button data-a="folder" data-f="Downloads">Downloads</button>
-      <button data-a="folder" data-f="Documents">Documents</button>
-      <button data-a="folder" data-f="Shared">Shared</button>
-    </div>`;
-  el.querySelector(".name").textContent = p.name;
-  el.querySelector(".name").title = p.name;
-  el.querySelectorAll("button").forEach(btn => {
-    btn.disabled = b;
-    btn.onclick = () => act(p, btn.dataset.a, btn.dataset.f);
-  });
+    <button class="primary open">Open</button>
+    <div class="folders-label">Folders</div>
+    <div class="folders">${["Downloads", "Documents", "Shared"].map(f =>
+      `<button class="folder" data-f="${f}" title="${FOLDER_HELP[f]}">${ICONS.folder}${f}</button>`).join("")}</div>
+    <div class="hint">Shared is the same folder in every profile.</div>
+    ${openMenu === p.id ? `<div class="menu" role="menu">
+      <button role="menuitem" data-a="${p.running ? "stop" : "start"}">${p.running ? ICONS.stop + "Stop" : ICONS.play + "Start"}</button>
+      <button role="menuitem" data-a="edit">${ICONS.edit}Edit name, colour & icon</button>
+      <button role="menuitem" data-a="clone">${ICONS.clone}Clone</button>
+      <hr>
+      <button role="menuitem" class="danger" data-a="delete">${ICONS.trash}Delete</button>
+    </div>` : ""}`;
+  el.querySelector(".name").textContent = el.querySelector(".name").title = p.name;
+  el.querySelectorAll("button").forEach(btn => btn.disabled = b);
+  el.querySelector(".open").onclick = () => window.open(`/p/${p.id}/`, `ec-${p.id}`);
+  el.querySelector(".gear").onclick = e => { e.stopPropagation(); openMenu = openMenu === p.id ? null : p.id; render();
+                                             grid.querySelector(".menu button")?.focus(); };
+  el.querySelectorAll(".folder").forEach(btn =>
+    btn.onclick = () => api(`/api/profiles/${p.id}/folder/${btn.dataset.f}`, "POST").catch(e => toast(e.message)));
+  el.querySelectorAll(".menu button").forEach(btn => btn.onclick = () => { openMenu = null; render(); act(p, btn.dataset.a); });
   return el;
 }
 
-async function act(p, a, folder) {
-  if (a === "open") return window.open(`/p/${p.id}/`, `ec-${p.id}`);
-  if (a === "edit") return openDialog("edit", p);
-  if (a === "clone") return openDialog("clone", p);
-  if (a === "delete" && !confirm(`Delete "${p.name}" and everything in it (logins, downloads, documents)?`)) return;
-  if (a === "folder") return api(`/api/profiles/${p.id}/folder/${folder}`, "POST").catch(e => toast(e.message));
+document.addEventListener("click", e => { if (openMenu && !e.target.closest(".menu")) { openMenu = null; render(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && openMenu) { openMenu = null; render(); } });
+
+async function act(p, a) {
+  if (a === "edit" || a === "clone") return openDialog(a, p);
+  if (a === "delete" && !confirm(`Delete "${p.name}" and everything in it (logins, downloads, documents)?`)) return render();
   busy.add(p.id); render();
   try {
     if (a === "delete") await api(`/api/profiles/${p.id}`, "DELETE");
@@ -155,39 +206,88 @@ async function act(p, a, folder) {
   busy.delete(p.id); refresh();
 }
 
-let mode, target;
+// ---------- icon upload: crop to a centred square and export favicon + app sizes in the browser ----------
+async function toPngs(file) {
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  const w = img.naturalWidth || 512, h = img.naturalHeight || 512, side = Math.min(w, h);
+  const out = {};
+  for (const s of [48, 192, 512]) {
+    const c = document.createElement("canvas");
+    c.width = c.height = s;
+    const g = c.getContext("2d");
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, s, s);
+    out[s] = c.toDataURL("image/png").split(",")[1];
+  }
+  URL.revokeObjectURL(img.src);
+  return out;
+}
+
+let mode, target, iconChange;  // iconChange: undefined = untouched, null = back to letters, object = new PNGs
+const $ = id => document.getElementById(id);
+
+function showPreview() {
+  $("f-preview").src = iconChange ? "data:image/png;base64," + iconChange[192]
+    : iconChange === null || !target?.icon || mode !== "edit" ? letterPreview() : iconUrl(target);
+  $("f-remove").hidden = !(iconChange || (iconChange === undefined && mode === "edit" && target?.icon));
+}
+
+function letterPreview() {
+  const words = $("f-name").value.match(/\w+/g) || ["?"];
+  const txt = (words[0][0] + (words[1]?.[0] ?? words[0].slice(1, 2))).toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="${$("f-color").value}"/>` +
+              `<text x="256" y="256" dy=".35em" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-weight="700" font-size="220" fill="#fff">${txt}</text></svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
 function openDialog(m, p) {
-  mode = m; target = p;
+  mode = m; target = p; iconChange = undefined;
   const titles = { new: ["New profile", "Create"], edit: ["Edit profile", "Save"], clone: [`Clone "${p?.name}"`, "Clone"] };
-  document.getElementById("dlg-title").textContent = titles[m][0];
-  document.getElementById("f-ok").textContent = titles[m][1];
-  document.getElementById("f-name").value = m === "edit" ? p.name : m === "clone" ? `${p.name} copy` : "";
-  document.getElementById("f-color").value = m === "edit" ? p.color :
+  $("dlg-title").textContent = titles[m][0];
+  $("f-ok").textContent = titles[m][1];
+  $("f-name").value = m === "edit" ? p.name : m === "clone" ? `${p.name} copy` : "";
+  $("f-color").value = m === "edit" ? p.color :
     ["#4f7cff", "#ff6b4f", "#22b07d", "#b55cff", "#ffb020", "#ff4f9a", "#14a8c4"][Math.floor(Math.random() * 7)];
+  $("f-icon-field").hidden = m === "clone";  // a clone keeps the original's icon
+  showPreview();
   dlg.showModal();
 }
 
+$("f-name").oninput = $("f-color").oninput = showPreview;
+$("f-upload").onclick = () => $("f-file").click();
+$("f-remove").onclick = () => { iconChange = null; showPreview(); };
+$("f-file").onchange = async () => {
+  const file = $("f-file").files[0];
+  $("f-file").value = "";
+  if (!file) return;
+  try { iconChange = await toPngs(file); showPreview(); } catch { toast("Couldn't read that image"); }
+};
+
 dlg.addEventListener("close", async () => {
   if (dlg.returnValue !== "ok") return;
-  const name = document.getElementById("f-name").value.trim(), color = document.getElementById("f-color").value;
+  const name = $("f-name").value.trim(), color = $("f-color").value, icon = iconChange;
   if (!name) return;
-  if (mode === "edit") {
-    await api(`/api/profiles/${target.id}`, "PATCH", { name, color }).catch(e => toast(e.message));
-    return refresh();
-  }
   const key = target?.id || "new";
   busy.add(key); render();
-  toast(mode === "clone" ? `Cloning ${target.name}…` : `Creating ${name}… (the first one downloads the browser image, ~1 GB)`);
   try {
-    await api("/api/profiles", "POST", { name, color, clone_of: mode === "clone" ? target.id : undefined });
-    toast(`${name} is ready`);
+    let id = target?.id;
+    if (mode === "edit") await api(`/api/profiles/${id}`, "PATCH", { name, color });
+    else {
+      toast(mode === "clone" ? `Cloning ${target.name}…` : `Creating ${name}… (the first one downloads the browser image, ~1 GB)`);
+      id = (await api("/api/profiles", "POST", { name, color, clone_of: mode === "clone" ? target.id : undefined })).id;
+    }
+    if (icon) await api(`/api/profiles/${id}/icon`, "POST", icon);
+    if (icon === null) await api(`/api/profiles/${id}/icon`, "DELETE");
+    if (mode !== "edit") toast(`${name} is ready`);
   } catch (e) { toast(e.message); }
   busy.delete(key); refresh();
 });
 
-document.getElementById("new").onclick = () => openDialog("new");
+$("new").onclick = () => openDialog("new");
 refresh();
-setInterval(() => busy.size || refresh(), 5000);
+setInterval(() => busy.size || openMenu || dlg.open || refresh(), 5000);
 </script>
 </body>
 </html>
