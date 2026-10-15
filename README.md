@@ -24,7 +24,7 @@ and icon in your taskbar or dock.
 Requirements: Docker (Docker Desktop on Windows/macOS) and Python 3.9+.
 
 ```sh
-git clone <this repo> && cd EndlessChrome
+git clone https://github.com/qxZap/EndlessChrome && cd EndlessChrome
 python endlesschrome.py
 ```
 
@@ -54,13 +54,22 @@ Back up `data/` and you've backed up every profile.
 | `ENDLESS_DATA` | `./data` | Where profiles are stored |
 | `ENDLESS_TZ` | container default (UTC) | Time zone the browsers report, e.g. `Europe/Berlin` |
 | `ENDLESS_BIND` | `127.0.0.1` | Set to `0.0.0.0` to reach the dashboard from other devices |
-| `ENDLESS_PASSWORD` | — | Required when `ENDLESS_BIND` isn't localhost. Log in as `endless` |
+| `ENDLESS_PASSWORD` | — | Turns on a login (user `endless`) for everything. Required when `ENDLESS_BIND` isn't localhost |
 | `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Browser image |
 
-**Using it from another device:** with `ENDLESS_BIND=0.0.0.0` and a password, profiles open over HTTPS on their own port.
-The certificate is self-signed, so accept the warning once per profile. To reach it from outside your home network,
-put it behind a private network such as Tailscale. Never expose it straight to the internet: it controls Docker and your
-logged-in browsers.
+## Using it from anywhere
+
+Everything (the dashboard, each profile's app and its live browser) is served from the one dashboard port. Profile views
+are relayed under `/v/<id>/`. So one HTTPS tunnel is enough:
+
+```sh
+ENDLESS_PASSWORD='a-long-random-password' python endlesschrome.py
+ngrok http 8790            # or: cloudflared tunnel --url http://localhost:8790, or Tailscale Funnel
+```
+
+Open the tunnel URL and log in as `endless`. **Always set a password before tunnelling:** the dashboard controls Docker
+and your logged-in browsers. The browser stream needs HTTPS (or localhost), so plain `http://` over a LAN won't stream.
+Use a tunnel or Tailscale instead.
 
 ## Automation
 
@@ -76,17 +85,20 @@ with sync_playwright() as pw:
 ## Known limits
 
 - **One controller per profile at a time.** If a second person opens the same profile, the first one is disconnected.
-- Each profile's app works best on the machine running EndlessChrome. Over the network, the app redirects to the profile's
-  HTTPS page instead of embedding it.
 - On Linux hosts, `cdp-forward` must be owned by root for the container to run it (`sudo chown root cdp-forward`).
 
 ## How it works
 
 `endlesschrome.py` serves the dashboard and drives the `docker` CLI. Every profile is a
 [linuxserver/chromium](https://docs.linuxserver.io/images/docker-chromium/) container, streamed to your browser with Selkies.
+The dashboard relays each container's viewer (HTTP and its websocket stream) at `/v/<id>/`, behind the same login.
 `cdp-forward` is a tiny service inside each container that exposes Chromium's debugging port, which Chromium otherwise binds
 to the container's own localhost. Profiles are stopped by closing Chromium first, so cookies are on disk before cloning or deleting.
 
 ```sh
 python endlesschrome.py --selftest
 ```
+
+## License
+
+[MIT](LICENSE)

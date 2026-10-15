@@ -7,6 +7,8 @@ Notes for AI coding agents working on EndlessChrome. Read README.md first for wh
 - `endlesschrome.py`: the whole backend. Stdlib-only HTTP server plus `docker` CLI calls. Keep it dependency-free.
 - `static/index.html`: the dashboard. Vanilla JS, no build step.
 - `static/app.html`: the per-profile app (PWA) page, a template filled with `{{ID}}`, `{{NAME}}` and `{{COLOR}}`.
+- Viewer relay: `Handler.proxy()` forwards `/v/<id>/...` (HTTP + websocket) to the container, which runs with
+  `SUBFOLDER=/v/<id>/`. Keep it behind `guard()`; it skips only the CSRF header check, since the viewer posts its own requests.
 - `cdp-forward`: Python service mounted at `/custom-services.d/` in each container. It exposes Chromium's DevTools port
   (bound to 127.0.0.1 inside the container) on `0.0.0.0:9223`.
 - `policies/`: Chromium managed policies mounted into every container (uBlock Origin Lite force-install).

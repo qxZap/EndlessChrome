@@ -27,9 +27,8 @@ async function boot() {
   if (p.error) { msg.textContent = "This profile no longer exists."; return; }
   if (!p.running) await api(`/api/profiles/${id}/start`, "POST");
   while (!(p = await api(`/api/profiles/${id}`)).ready) await new Promise(r => setTimeout(r, 1000));
-  if (!p.local) { location.replace(`https://${location.hostname}:${p.ports.https}/`); return; }  // LAN: viewer has its own login
   const f = document.createElement("iframe");
-  f.src = `http://${location.hostname}:${p.ports.view}/`;
+  f.src = `/v/${id}/`;  // proxied by the dashboard, so it works locally and through a tunnel alike
   f.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
   document.body.replaceChildren(f);
   f.focus();

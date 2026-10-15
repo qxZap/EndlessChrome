@@ -89,15 +89,14 @@ def start(pid):
             "-p", f"127.0.0.1:{pr['view']}:3000", "-p", f"127.0.0.1:{pr['cdp']}:9223",
             "-v", f"{home}:/config", "-v", f"{SHARED}:/config/Shared",
             "-v", f"{DIR / 'cdp-forward'}:/custom-services.d/cdp-forward:ro",
-            "-e", f"TITLE={p['name']}", "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble"]
+            "-e", f"TITLE={p['name']}", "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble",
+            "-e", f"SUBFOLDER=/v/{pid}/"]  # the dashboard proxies the viewer at this path
     if (DIR / "policies").is_dir():
         args += ["-v", f"{DIR / 'policies'}:/etc/chromium/policies/managed:ro"]
     if os.environ.get("ENDLESS_TZ"):
         args += ["-e", f"TZ={os.environ['ENDLESS_TZ']}"]
     if hasattr(os, "getuid"):
         args += ["-e", f"PUID={os.getuid()}", "-e", f"PGID={os.getgid()}"]
-    if not LOCAL:  # other devices reach the HTTPS port, behind the same password
-        args += ["-p", f"{BIND}:{pr['https']}:3001", "-e", "CUSTOM_USER=endless", "-e", f"PASSWORD={PASSWORD}"]
     docker(*args, IMAGE)
 
 
@@ -113,12 +112,12 @@ def stop(pid):
 def create(name, color=None, clone_of=None):
     with lock:
         pid = uuid.uuid4().hex[:8]
-        view, https, cdp = alloc_ports(3)
+        view, cdp = alloc_ports(2)
         root = PROFILES / pid
         (root / "home").mkdir(parents=True)
         SHARED.mkdir(parents=True, exist_ok=True)
         p = {"id": pid, "name": name, "color": color or random.choice(PALETTE), "created": time.time(),
-             "ports": {"view": view, "https": https, "cdp": cdp}}
+             "ports": {"view": view, "cdp": cdp}}
         if clone_of:
             src = load(clone_of)
             if src.get("icon"):
@@ -149,7 +148,7 @@ def delete(pid):
 
 def ready(p):
     try:
-        return urllib.request.urlopen(f"http://127.0.0.1:{p['ports']['view']}/", timeout=2).status == 200
+        return urllib.request.urlopen(f"http://127.0.0.1:{p['ports']['view']}/v/{p['id']}/", timeout=2).status == 200
     except OSError:
         return False
 
@@ -218,7 +217,8 @@ def manifest(p):
 # ---------- HTTP ----------
 
 def host_ok(host_header):
-    return not LOCAL or host_header.rsplit(":", 1)[0] in ("localhost", "127.0.0.1", "[::1]")
+    # with a password set, any host (e.g. an ngrok URL) is fine: the login is what protects it
+    return bool(PASSWORD) or not LOCAL or host_header.rsplit(":", 1)[0] in ("localhost", "127.0.0.1", "[::1]")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -235,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def guard(self):
+    def guard(self, csrf=True):
         if not host_ok(self.headers.get("Host", "")):  # blocks DNS-rebinding sites from driving docker
             self.send(403, {"error": "bad host"})
             return False
@@ -247,16 +247,54 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return False
         # custom header forces a CORS preflight we never answer, so other sites can't POST here
-        if self.command != "GET" and self.headers.get("X-EndlessChrome") != "1":
+        if csrf and self.command != "GET" and self.headers.get("X-EndlessChrome") != "1":
             self.send(403, {"error": "missing X-EndlessChrome header"})
             return False
         return True
+
+    def proxy(self):
+        """Relay /v/<id>/... (plain HTTP and the viewer's websocket) to that profile's container."""
+        if not self.guard(csrf=False):
+            return
+        m = re.match(r"/v/(\w+)/", self.path)
+        if not m or not (PROFILES / m[1] / "profile.json").exists():
+            return self.send(404, {"error": "not found"})
+        try:
+            up = socket.create_connection(("127.0.0.1", load(m[1])["ports"]["view"]), timeout=10)
+        except OSError:
+            return self.send(502, {"error": "profile is not running"})
+        upgrade = self.headers.get("Upgrade", "").lower() == "websocket"
+        head = [f"{self.command} {self.path} HTTP/1.1"] + [
+            f"{k}: {v}" for k, v in self.headers.items() if k.lower() not in ("connection", "keep-alive", "authorization")]
+        # one request per upstream connection, so a reused browser connection can't skip this handler
+        head.append("Connection: Upgrade" if upgrade else "Connection: close")
+        up.sendall(("\r\n".join(head) + "\r\n\r\n").encode("latin-1"))
+        up.settimeout(None)
+        self.close_connection = True
+
+        def client_to_container():
+            try:
+                while data := self.rfile.read1(65536):
+                    up.sendall(data)
+            except OSError:
+                pass
+
+        threading.Thread(target=client_to_container, daemon=True).start()
+        try:
+            while data := up.recv(65536):
+                self.connection.sendall(data)
+        except OSError:
+            pass
+        finally:
+            up.close()
 
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
     def do_GET(self):
+        if self.path.startswith("/v/"):
+            return self.proxy()
         if not self.guard():
             return
         path = self.path.split("?")[0]
@@ -287,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.startswith("/v/"):
+            return self.proxy()
         if not self.guard():
             return
         try:
@@ -323,6 +363,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {"error": str(e)})
 
     def do_PATCH(self):
+        if self.path.startswith("/v/"):
+            return self.proxy()
         if not self.guard():
             return
         m = re.fullmatch(r"/api/profiles/(\w+)", self.path)
@@ -337,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, p)
 
     def do_DELETE(self):
+        if self.path.startswith("/v/"):
+            return self.proxy()
         if not self.guard():
             return
         m = re.fullmatch(r"/api/profiles/(\w+)(/icon)?", self.path)
