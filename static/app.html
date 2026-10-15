@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{NAME}}</title>
+<meta name="theme-color" content="{{COLOR}}">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  html, body { margin: 0; height: 100%; background: #0e0f13; color: #c9ccd6; font: 15px system-ui, sans-serif; }
+  iframe { border: 0; width: 100%; height: 100%; display: block; }
+  #wait { height: 100%; display: grid; place-content: center; gap: 14px; text-align: center; }
+  #wait img { width: 72px; margin: auto; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; transform: scale(.94); } }
+</style>
+</head>
+<body>
+<div id="wait"><img src="icon.svg" alt=""><div id="msg">Starting {{NAME}}…</div></div>
+<script>
+const id = "{{ID}}", msg = document.getElementById("msg");
+const api = (path, method = "GET") => fetch(path, { method, headers: { "X-EndlessChrome": "1" } }).then(r => r.json());
+
+async function boot() {
+  let p = await api(`/api/profiles/${id}`);
+  if (p.error) { msg.textContent = "This profile no longer exists."; return; }
+  if (!p.running) await api(`/api/profiles/${id}/start`, "POST");
+  while (!(p = await api(`/api/profiles/${id}`)).ready) await new Promise(r => setTimeout(r, 1000));
+  if (!p.local) { location.replace(`https://${location.hostname}:${p.ports.https}/`); return; }  // LAN: viewer has its own login
+  const f = document.createElement("iframe");
+  f.src = `http://${location.hostname}:${p.ports.view}/`;
+  f.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
+  document.body.replaceChildren(f);
+  f.focus();
+}
+boot().catch(e => msg.textContent = "Couldn't start: " + e);
+</script>
+</body>
+</html>

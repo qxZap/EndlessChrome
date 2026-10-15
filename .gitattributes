@@ -1,0 +1,2 @@
+# cdp-forward runs inside Linux containers: CRLF would break its shebang
+cdp-forward text eol=lf

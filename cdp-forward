@@ -1,0 +1,25 @@
+#!/lsiopy/bin/python3
+# Chromium binds its debug port to 127.0.0.1 only; expose it as 0.0.0.0:9223 so the host bot can reach it.
+import asyncio
+
+async def pipe(r, w):
+    try:
+        while data := await r.read(65536):
+            w.write(data)
+            await w.drain()
+    finally:
+        w.close()
+
+async def handle(cr, cw):
+    try:
+        ur, uw = await asyncio.open_connection("127.0.0.1", 9222)
+    except OSError:
+        cw.close()
+        return
+    await asyncio.gather(pipe(cr, uw), pipe(ur, cw), return_exceptions=True)
+
+async def main():
+    async with await asyncio.start_server(handle, "0.0.0.0", 9223) as s:
+        await s.serve_forever()
+
+asyncio.run(main())
