@@ -4,7 +4,7 @@ python endlesschrome.py              dashboard on http://localhost:8790
 python endlesschrome.py --selftest
 
 Env: ENDLESS_PORT (8790), ENDLESS_DATA (./data), ENDLESS_TZ (e.g. Europe/Berlin),
-     ENDLESS_BIND + ENDLESS_PASSWORD to reach it from other devices (password required then).
+     ENDLESS_USER (endless) + ENDLESS_PASSWORD turn on a login; ENDLESS_BIND + ENDLESS_PASSWORD to reach it from other devices (password required then).
 """
 import base64, html, json, os, random, re, secrets, shutil, socket, subprocess, sys, threading, time, uuid
 import urllib.request
@@ -18,6 +18,7 @@ IMAGE = os.environ.get("ENDLESS_IMAGE", "lscr.io/linuxserver/chromium:latest")
 PORT = int(os.environ.get("ENDLESS_PORT", 8790))
 BIND = os.environ.get("ENDLESS_BIND", "127.0.0.1")
 LOCAL = BIND in ("127.0.0.1", "localhost")
+USER = os.environ.get("ENDLESS_USER", "endless")
 PASSWORD = os.environ.get("ENDLESS_PASSWORD", "")
 FIRST_PORT = 23100
 FOLDERS = ("Downloads", "Documents", "Shared")
@@ -240,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(403, {"error": "bad host"})
             return False
         if PASSWORD:
-            want = "Basic " + base64.b64encode(f"endless:{PASSWORD}".encode()).decode()
+            want = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
             if not secrets.compare_digest(self.headers.get("Authorization", ""), want):
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="EndlessChrome"')

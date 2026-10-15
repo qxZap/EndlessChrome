@@ -54,7 +54,8 @@ Back up `data/` and you've backed up every profile.
 | `ENDLESS_DATA` | `./data` | Where profiles are stored |
 | `ENDLESS_TZ` | container default (UTC) | Time zone the browsers report, e.g. `Europe/Berlin` |
 | `ENDLESS_BIND` | `127.0.0.1` | Set to `0.0.0.0` to reach the dashboard from other devices |
-| `ENDLESS_PASSWORD` | — | Turns on a login (user `endless`) for everything. Required when `ENDLESS_BIND` isn't localhost |
+| `ENDLESS_USER` | `endless` | Login username |
+| `ENDLESS_PASSWORD` | — | Turns on a login for everything. Required when `ENDLESS_BIND` isn't localhost |
 | `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Browser image |
 
 ## Using it from anywhere
@@ -67,7 +68,7 @@ ENDLESS_PASSWORD='a-long-random-password' python endlesschrome.py
 ngrok http 8790            # or: cloudflared tunnel --url http://localhost:8790, or Tailscale Funnel
 ```
 
-Open the tunnel URL and log in as `endless`. **Always set a password before tunnelling:** the dashboard controls Docker
+Open the tunnel URL and log in with your `ENDLESS_USER` and password. **Always set a password before tunnelling:** the dashboard controls Docker
 and your logged-in browsers. The browser stream needs HTTPS (or localhost), so plain `http://` over a LAN won't stream.
 Use a tunnel or Tailscale instead.
 
