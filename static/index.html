@@ -68,6 +68,12 @@
   label, .field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
   input[type=text] { font: inherit; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
   input[type=color] { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding: 2px; }
+  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kind { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; color: var(--text); }
+  .kind:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .kind:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .kind input { position: absolute; opacity: 0; pointer-events: none; }
+  .kind span { font-size: 12px; color: var(--muted); }
   .icon-row { display: flex; align-items: center; gap: 12px; }
   .icon-row img { width: 56px; height: 56px; border-radius: 13px; object-fit: cover; }
   .icon-row button { font-size: 13px; padding: 6px 10px; }
@@ -92,6 +98,14 @@
 <dialog id="dlg">
   <form method="dialog" id="form">
     <h2 id="dlg-title"></h2>
+    <div class="field" id="f-kind-field">Type
+      <div class="kinds">
+        <label class="kind"><input type="radio" name="kind" value="browser" checked>
+          <b>Browser</b><span>One Chromium window. Light, about 400 MB.</span></label>
+        <label class="kind"><input type="radio" name="kind" value="os">
+          <b>Full OS</b><span>A whole Ubuntu desktop with apps. About 300 MB idle.</span></label>
+      </div>
+    </div>
     <label>Name <input type="text" id="f-name" required maxlength="60" autocomplete="off"></label>
     <label>Colour <input type="color" id="f-color"></label>
     <div class="field" id="f-icon-field">Icon
@@ -115,6 +129,7 @@ const ICONS = {
   stop: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>',
   edit: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   clone: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>',
+  eye: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   trash: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
 };
 const FOLDER_HELP = {
@@ -165,7 +180,7 @@ function card(p) {
       <img class="avatar" src="${iconUrl(p)}" alt="">
       <div class="who">
         <div class="name"></div>
-        <div class="status ${p.running ? "on" : ""}"><span class="dot"></span>${b ? "Working…" : p.running ? "Running" : "Stopped"}</div>
+        <div class="status ${p.running ? "on" : ""}"><span class="dot"></span>${b ? "Working…" : p.running ? "Running" : "Stopped"} · ${p.kind === "os" ? "Full OS" : "Browser"}</div>
       </div>
       <button class="gear" aria-label="Profile settings" aria-haspopup="menu" aria-expanded="${openMenu === p.id}">${ICONS.gear}</button>
     </div>
@@ -178,6 +193,7 @@ function card(p) {
       <button role="menuitem" data-a="${p.running ? "stop" : "start"}">${p.running ? ICONS.stop + "Stop" : ICONS.play + "Start"}</button>
       <button role="menuitem" data-a="edit">${ICONS.edit}Edit name, colour & icon</button>
       <button role="menuitem" data-a="clone">${ICONS.clone}Clone</button>
+      <button role="menuitem" data-a="share">${ICONS.eye}Copy watch link</button>
       <hr>
       <button role="menuitem" class="danger" data-a="delete">${ICONS.trash}Delete</button>
     </div>` : ""}`;
@@ -197,6 +213,11 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && openMenu) 
 
 async function act(p, a) {
   if (a === "edit" || a === "clone") return openDialog(a, p);
+  if (a === "share") {
+    const link = `${location.origin}/p/${p.id}/?watch`;
+    return navigator.clipboard.writeText(link).then(() => toast("Watch link copied: viewers see the screen live but can't control it"),
+                                                    () => toast(link));
+  }
   if (a === "delete" && !confirm(`Delete "${p.name}" and everything in it (logins, downloads, documents)?`)) return render();
   busy.add(p.id); render();
   try {
@@ -251,6 +272,8 @@ function openDialog(m, p) {
   $("f-color").value = m === "edit" ? p.color :
     ["#4f7cff", "#ff6b4f", "#22b07d", "#b55cff", "#ffb020", "#ff4f9a", "#14a8c4"][Math.floor(Math.random() * 7)];
   $("f-icon-field").hidden = m === "clone";  // a clone keeps the original's icon
+  $("f-kind-field").hidden = m !== "new";    // a profile's type is fixed once created
+  if (m === "new") $("form").elements.kind.value = "browser";
   showPreview();
   dlg.showModal();
 }
@@ -267,7 +290,7 @@ $("f-file").onchange = async () => {
 
 dlg.addEventListener("close", async () => {
   if (dlg.returnValue !== "ok") return;
-  const name = $("f-name").value.trim(), color = $("f-color").value, icon = iconChange;
+  const name = $("f-name").value.trim(), color = $("f-color").value, icon = iconChange, kind = $("form").elements.kind.value;
   if (!name) return;
   const key = target?.id || "new";
   busy.add(key); render();
@@ -275,8 +298,8 @@ dlg.addEventListener("close", async () => {
     let id = target?.id;
     if (mode === "edit") await api(`/api/profiles/${id}`, "PATCH", { name, color });
     else {
-      toast(mode === "clone" ? `Cloning ${target.name}…` : `Creating ${name}… (the first one downloads the browser image, ~1 GB)`);
-      id = (await api("/api/profiles", "POST", { name, color, clone_of: mode === "clone" ? target.id : undefined })).id;
+      toast(mode === "clone" ? `Cloning ${target.name}…` : `Creating ${name}… (the first of each type downloads its image, 1–3 GB)`);
+      id = (await api("/api/profiles", "POST", { name, color, kind, clone_of: mode === "clone" ? target.id : undefined })).id;
     }
     if (icon) await api(`/api/profiles/${id}/icon`, "POST", icon);
     if (icon === null) await api(`/api/profiles/${id}/icon`, "DELETE");

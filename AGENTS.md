@@ -16,6 +16,10 @@ Notes for AI coding agents working on EndlessChrome. Read README.md first for wh
 
 ## Rules that matter
 
+- Profiles have a `kind` (`browser` default, or `os`). Chromium-only bits (CDP port, `cdp-forward`, `policies/`, `CHROME_CLI`)
+  are applied only to browsers; `image_of(p)` picks the image.
+- `static/app.html` watches the iframe for Selkies' "Connection Terminated" text to show the disconnected screen; `?watch` loads
+  Selkies' read-only `#shared` mode.
 - `profile.json` is the source of truth for profiles; Docker only tells us which ones are running
   (label `endlesschrome=<id>`). Containers run with `--rm`, so start always means a fresh container.
 - **Stop Chromium before stopping the container** (`stop()` does this). Otherwise cookies and localStorage are lost,

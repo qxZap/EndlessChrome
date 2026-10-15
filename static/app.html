@@ -12,26 +12,65 @@
   html, body { margin: 0; height: 100%; background: #0e0f13; color: #c9ccd6; font: 15px system-ui, sans-serif; }
   iframe { border: 0; width: 100%; height: 100%; display: block; }
   #wait { height: 100%; display: grid; place-content: center; gap: 14px; text-align: center; }
-  #wait img { width: 72px; margin: auto; border-radius: 16px; animation: pulse 1.4s ease-in-out infinite; }
+  #wait img, #gone img { width: 72px; margin: auto; border-radius: 16px; }
+  #wait img { animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .45; transform: scale(.94); } }
+  #gone { position: fixed; inset: 0; display: grid; place-content: center; gap: 14px; text-align: center; padding: 16px;
+          background: #0e0f13e6; backdrop-filter: blur(6px); }
+  #gone[hidden] { display: none; }
+  #gone h1 { margin: 0; font-size: 20px; color: #fff; }
+  #gone p { margin: 0; max-width: 420px; color: #9ba1b0; }
+  #gone .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+  #gone button { font: inherit; border-radius: 9px; padding: 9px 16px; cursor: pointer; border: 1px solid #333846; background: #1b1e26; color: #e8eaf0; }
+  #gone button.primary { background: {{COLOR}}; border-color: transparent; color: #fff; }
+  #badge { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #000a; color: #fff; padding: 4px 12px;
+           border-radius: 999px; font-size: 13px; pointer-events: none; }
 </style>
 </head>
 <body>
 <div id="wait"><img src="{{ICON}}" alt=""><div id="msg">Starting {{NAME}}…</div></div>
+<div id="gone" hidden role="alert">
+  <img src="{{ICON}}" alt="">
+  <h1>You were disconnected</h1>
+  <p>Someone else opened {{NAME}} and took control. Only one person can control it at a time, but anyone can watch.</p>
+  <div class="row"><button class="primary" id="take">Take control back</button><button id="watch">Watch instead</button></div>
+</div>
 <script>
-const id = "{{ID}}", msg = document.getElementById("msg");
+const id = "{{ID}}", msg = document.getElementById("msg"), gone = document.getElementById("gone");
 const api = (path, method = "GET") => fetch(path, { method, headers: { "X-EndlessChrome": "1" } }).then(r => r.json());
+let frame;
+
+function show(watching) {
+  history.replaceState(null, "", watching ? "?watch" : location.pathname);
+  gone.hidden = true;
+  frame?.remove();
+  frame = document.createElement("iframe");
+  // #shared = Selkies' read-only viewer: it never kicks the person in control
+  frame.src = `/v/${id}/${watching ? "#shared" : ""}`;
+  frame.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
+  document.body.prepend(frame);
+  frame.focus();
+  document.getElementById("badge")?.remove();
+  if (watching) document.body.insertAdjacentHTML("beforeend", `<div id="badge">Watching · read-only</div>`);
+}
+
+// Selkies closes the stream and shows a tiny "Connection Terminated" line when another controller connects;
+// turn that into a clear screen instead of a frozen picture.
+setInterval(() => {
+  try {
+    if (gone.hidden && frame?.contentDocument?.body?.innerText.includes("Connection Terminated")) gone.hidden = false;
+  } catch {}
+}, 1000);
+document.getElementById("take").onclick = () => show(false);
+document.getElementById("watch").onclick = () => show(true);
 
 async function boot() {
   let p = await api(`/api/profiles/${id}`);
   if (p.error) { msg.textContent = "This profile no longer exists."; return; }
   if (!p.running) await api(`/api/profiles/${id}/start`, "POST");
   while (!(p = await api(`/api/profiles/${id}`)).ready) await new Promise(r => setTimeout(r, 1000));
-  const f = document.createElement("iframe");
-  f.src = `/v/${id}/`;  // proxied by the dashboard, so it works locally and through a tunnel alike
-  f.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
-  document.body.replaceChildren(f);
-  f.focus();
+  document.getElementById("wait").remove();
+  show(new URLSearchParams(location.search).has("watch"));
 }
 boot().catch(e => msg.textContent = "Couldn't start: " + e);
 </script>

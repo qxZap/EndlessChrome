@@ -14,7 +14,10 @@ from pathlib import Path
 DIR = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("ENDLESS_DATA", DIR / "data")).resolve()
 PROFILES, SHARED = DATA / "profiles", DATA / "shared"
-IMAGE = os.environ.get("ENDLESS_IMAGE", "lscr.io/linuxserver/chromium:latest")
+KINDS = {  # what a profile runs: same Selkies viewer, /config home and SUBFOLDER support in both images
+    "browser": os.environ.get("ENDLESS_IMAGE", "lscr.io/linuxserver/chromium:latest"),
+    "os": os.environ.get("ENDLESS_OS_IMAGE", "lscr.io/linuxserver/webtop:ubuntu-xfce"),
+}
 PORT = int(os.environ.get("ENDLESS_PORT", 8790))
 BIND = os.environ.get("ENDLESS_BIND", "127.0.0.1")
 LOCAL = BIND in ("127.0.0.1", "localhost")
@@ -76,10 +79,14 @@ def alloc_ports(n):
     return out
 
 
-def in_image(script, *mounts):
-    """Run a shell line in the browser image, so Linux owners/symlinks inside profiles are handled on any host."""
+def image_of(p):
+    return KINDS[p.get("kind", "browser")]
+
+
+def in_image(image, script, *mounts):
+    """Run a shell line in the profile's image, so Linux owners/symlinks inside profiles are handled on any host."""
     vols = [a for host, ctr in mounts for a in ("-v", f"{host}:{ctr}")]
-    docker("run", "--rm", *vols, "--entrypoint", "sh", IMAGE, "-c", script)
+    docker("run", "--rm", *vols, "--entrypoint", "sh", image, "-c", script)
 
 
 def start(pid):
@@ -87,18 +94,20 @@ def start(pid):
     pr = p["ports"]
     args = ["run", "-d", "--rm", "--name", f"endless-{pid}", "--label", f"endlesschrome={pid}",
             "--shm-size=1g", "--hostname", re.sub(r"[^a-z0-9-]", "", p["name"].lower().replace(" ", "-"))[:40] or pid,
-            "-p", f"127.0.0.1:{pr['view']}:3000", "-p", f"127.0.0.1:{pr['cdp']}:9223",
+            "-p", f"127.0.0.1:{pr['view']}:3000",
             "-v", f"{home}:/config", "-v", f"{SHARED}:/config/Shared",
-            "-v", f"{DIR / 'cdp-forward'}:/custom-services.d/cdp-forward:ro",
-            "-e", f"TITLE={p['name']}", "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble",
-            "-e", f"SUBFOLDER=/v/{pid}/"]  # the dashboard proxies the viewer at this path
-    if (DIR / "policies").is_dir():
-        args += ["-v", f"{DIR / 'policies'}:/etc/chromium/policies/managed:ro"]
+            "-e", f"TITLE={p['name']}", "-e", f"SUBFOLDER=/v/{pid}/"]  # the dashboard proxies the viewer at this path
+    if p.get("kind", "browser") == "browser":
+        args += ["-p", f"127.0.0.1:{pr['cdp']}:9223",
+                 "-v", f"{DIR / 'cdp-forward'}:/custom-services.d/cdp-forward:ro",
+                 "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble"]
+        if (DIR / "policies").is_dir():
+            args += ["-v", f"{DIR / 'policies'}:/etc/chromium/policies/managed:ro"]
     if os.environ.get("ENDLESS_TZ"):
         args += ["-e", f"TZ={os.environ['ENDLESS_TZ']}"]
     if hasattr(os, "getuid"):
         args += ["-e", f"PUID={os.getuid()}", "-e", f"PGID={os.getgid()}"]
-    docker(*args, IMAGE)
+    docker(*args, image_of(p))
 
 
 def stop(pid):
@@ -110,7 +119,7 @@ def stop(pid):
         docker("stop", "-t", "10", f"endless-{pid}", timeout=60)  # --rm removes it
 
 
-def create(name, color=None, clone_of=None):
+def create(name, color=None, clone_of=None, kind="browser"):
     with lock:
         pid = uuid.uuid4().hex[:8]
         view, cdp = alloc_ports(2)
@@ -118,9 +127,10 @@ def create(name, color=None, clone_of=None):
         (root / "home").mkdir(parents=True)
         SHARED.mkdir(parents=True, exist_ok=True)
         p = {"id": pid, "name": name, "color": color or random.choice(PALETTE), "created": time.time(),
-             "ports": {"view": view, "cdp": cdp}}
+             "ports": {"view": view, "cdp": cdp}, "kind": kind}
         if clone_of:
             src = load(clone_of)
+            p["kind"] = src.get("kind", "browser")
             if src.get("icon"):
                 for s in ICON_SIZES:
                     shutil.copy(PROFILES / clone_of / f"icon-{s}.png", root / f"icon-{s}.png")
@@ -128,7 +138,7 @@ def create(name, color=None, clone_of=None):
             was_running = clone_of in running_ids()
             stop(clone_of)  # copy a closed profile, not one Chromium is writing to
             try:
-                in_image("cp -a /src/. /dst/ && rm -f /dst/.config/chromium/Singleton*",
+                in_image(image_of(src), "cp -a /src/. /dst/ && rm -f /dst/.config/chromium/Singleton*",
                          (PROFILES / clone_of / "home", "/src"), (root / "home", "/dst"))
             finally:
                 if was_running:
@@ -143,7 +153,7 @@ def create(name, color=None, clone_of=None):
 
 def delete(pid):
     stop(pid)
-    in_image("rm -rf /p/home", (PROFILES / pid, "/p"))
+    in_image(image_of(load(pid)), "rm -rf /p/home", (PROFILES / pid, "/p"))
     shutil.rmtree(PROFILES / pid)
 
 
@@ -339,8 +349,11 @@ class Handler(BaseHTTPRequestHandler):
                 clone_of = b.get("clone_of")
                 if clone_of and not (PROFILES / str(clone_of) / "profile.json").exists():
                     return self.send(404, {"error": "no such profile"})
+                kind = b.get("kind", "browser")
+                if kind not in KINDS:
+                    return self.send(400, {"error": "kind must be browser or os"})
                 color = b.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get("color", ""))) else None
-                return self.send(201, create(name, color, clone_of))
+                return self.send(201, create(name, color, clone_of, kind))
             m = re.fullmatch(r"/api/profiles/(\w+)/icon", self.path)
             if m and (PROFILES / m[1] / "profile.json").exists():
                 try:

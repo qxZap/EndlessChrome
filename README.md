@@ -1,6 +1,6 @@
 # EndlessChrome
 
-Run as many isolated Chromium browsers as your machine can hold, and manage them all from one web dashboard.
+Run as many isolated Chromium browsers and full Linux desktops as your machine can hold, and manage them all from one web dashboard.
 
 Each **profile** is its own Chromium in a lightweight Docker container (~400 MB RAM) with its own logins,
 cookies, extensions and history. Every profile installs as its **own app**, with its own name, colour
@@ -10,6 +10,9 @@ and icon in your taskbar or dock.
 
 ## Features
 
+- **Two kinds of profile:** *Browser* (one Chromium, ~400 MB) or *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle).
+  Think of a Full OS profile as a Linux VM that starts in seconds.
+- **Watch together:** *Copy watch link* in the ⚙ menu gives a read-only live view. Any number of people can watch while one person controls.
 - **Create, clone, rename, recolour, start, stop and delete** profiles from the dashboard (the ⚙ menu on each card).
 - **Custom icons:** upload any image. It is cropped square and converted in your browser to a 48 px favicon and 192/512 px app icons. Without an image, a letter icon in the profile colour is generated.
 - **One app per profile:** open a profile and install it from Chrome's address bar. It gets its own window and icon.
@@ -56,7 +59,8 @@ Back up `data/` and you've backed up every profile.
 | `ENDLESS_BIND` | `127.0.0.1` | Set to `0.0.0.0` to reach the dashboard from other devices |
 | `ENDLESS_USER` | `endless` | Login username |
 | `ENDLESS_PASSWORD` | — | Turns on a login for everything. Required when `ENDLESS_BIND` isn't localhost |
-| `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Browser image |
+| `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Image for *Browser* profiles |
+| `ENDLESS_OS_IMAGE` | `lscr.io/linuxserver/webtop:ubuntu-xfce` | Image for *Full OS* profiles (any linuxserver webtop tag works, e.g. `ubuntu-kde`) |
 
 ## Using it from anywhere
 
@@ -85,7 +89,9 @@ with sync_playwright() as pw:
 
 ## Known limits
 
-- **One controller per profile at a time.** If a second person opens the same profile, the first one is disconnected.
+- **One controller per profile at a time** (a limit of the Selkies streamer). If someone else opens the same profile to control it,
+  the previous controller sees a *You were disconnected* screen and can take control back or watch instead.
+  Watch links never disconnect anyone. Anyone with the dashboard login can control, so share the login only with people you trust.
 - On Linux hosts, `cdp-forward` must be owned by root for the container to run it (`sudo chown root cdp-forward`).
 
 ## How it works
