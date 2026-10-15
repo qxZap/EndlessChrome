@@ -38,6 +38,10 @@ after that a new profile starts in a few seconds.
 
 To install a profile as an app, click **Open**, then click the install icon in Chrome's address bar.
 
+**Windows desktop shortcuts:** run `powershell -ExecutionPolicy Bypass -File windows\install-shortcuts.ps1` to get
+**Endless On** (starts the dashboard in the background and opens it) and **Endless OFF** (closes every profile cleanly,
+then stops everything). Set `ENDLESS_NGROK=1` in `.env` to have On also open an ngrok tunnel.
+
 ## Where things live
 
 ```

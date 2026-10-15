@@ -2,6 +2,7 @@
 
 python endlesschrome.py              dashboard on http://localhost:8790
 python endlesschrome.py --selftest
+python endlesschrome.py --stop-all   close every running profile cleanly
 
 Env: ENDLESS_PORT (8790), ENDLESS_DATA (./data), ENDLESS_TZ (e.g. Europe/Berlin),
      ENDLESS_USER (endless) + ENDLESS_PASSWORD turn on a login; ENDLESS_BIND + ENDLESS_PASSWORD to reach it from other devices (password required then).
@@ -415,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def selftest():
-    global LOCAL
+    global LOCAL, PASSWORD
     assert initials("Work Account") == "WA" and initials("ig") == "IG" and initials("!!") == "?"
     p = {"id": "abc", "name": "<x> & y", "color": '"/><script>'}
     assert "<script>" not in icon_svg(p)  # color/name can't inject markup
@@ -423,8 +424,10 @@ def selftest():
     assert m["scope"] == m["start_url"] == m["id"] == "/p/abc/"
     assert manifest({**p, "icon": 7})["icons"][1]["src"] == "/p/abc/icon-512.png?v=7"
     assert valid_png(b"\x89PNG\r\n\x1a\n...") and not valid_png(b"<svg onload=x>")
-    LOCAL = True
+    LOCAL, PASSWORD = True, ""  # independent of any .env
     assert host_ok("localhost:8790") and host_ok("127.0.0.1:8790") and not host_ok("evil.com:8790")
+    PASSWORD = "x"
+    assert host_ok("abc.ngrok-free.dev")  # with a login, tunnel hosts are allowed
     a = alloc_ports(3)
     assert len(set(a)) == 3 and all(port_free(x) for x in a)
     print("selftest ok")
@@ -433,6 +436,10 @@ def selftest():
 if __name__ == "__main__":
     if sys.argv[1:] == ["--selftest"]:
         selftest()
+    elif sys.argv[1:] == ["--stop-all"]:  # used by windows/endless-off.ps1
+        for pid in running_ids():
+            print("stopping", load(pid)["name"])
+            stop(pid)
     else:
         if not LOCAL and not PASSWORD:
             sys.exit("ENDLESS_BIND exposes the dashboard to other devices: set ENDLESS_PASSWORD too.")
