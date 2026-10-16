@@ -18,6 +18,7 @@ Notes for AI coding agents working on EndlessChrome. Read README.md first for wh
 
 - Android profiles (`kind: android`) run budtmo/docker-android with `--device /dev/kvm`; their disks live in the docker volumes from
   `android_volumes()` (chowned to uid 1300 by `android_prepare()`), and noVNC is served from `/`, so `proxy()` strips `/v/<id>`.
+- Android boxes publish ADB on `ports.cdp` (127.0.0.1 only). `install_apk()` copies the upload in and runs `adb install -r -g`.
 - `proxy()` forces `Connection: close` on plain responses: a reused browser connection would bypass routing and `guard()`.
 - Box passwords: PBKDF2 hash in `data/profiles/<id>/password.json` (never in profile.json, which API responses return raw).
   `box_ok()` guards `/p/<id>/` and the `/v/<id>/` relay; unlock sets an HMAC cookie tied to the stored hash, so a password

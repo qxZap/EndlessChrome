@@ -114,7 +114,8 @@ def start(pid):
             "--hostname", re.sub(r"[^a-z0-9-]", "", p["name"].lower().replace(" ", "-"))[:40] or pid]
     if p.get("kind") == "android":
         android_prepare(p)
-        args += ["--device", "/dev/kvm", "-p", f"127.0.0.1:{pr['view']}:6080",
+        # second port = ADB, so `adb connect 127.0.0.1:<port>` / Android Studio can deploy to the box
+        args += ["--device", "/dev/kvm", "-p", f"127.0.0.1:{pr['view']}:6080", "-p", f"127.0.0.1:{pr['cdp']}:5555",
                  "-e", "EMULATOR_DEVICE=Samsung Galaxy S10", "-e", "WEB_VNC=true",
                  "-e", "EMULATOR_ADDITIONAL_ARGS=-memory 2048"]
         args += [a for v, path in android_volumes(pid) for a in ("-v", f"{v}:{path}")]
@@ -193,6 +194,24 @@ def delete(pid):
     if load(pid).get("kind") == "android":
         docker("volume", "rm", "-f", *[v for v, _ in android_volumes(pid)])
     shutil.rmtree(PROFILES / pid)
+
+
+MAX_APK = 1_000_000_000
+
+
+def install_apk(pid, data):
+    """Copy an uploaded APK into the Android box and install it with adb (-r reinstall keeps data, -g grants permissions)."""
+    if data[:2] != b"PK":
+        raise ValueError("that file is not an APK")
+    if pid not in running_ids() or docker("exec", f"endless-{pid}", "cat", "/home/androidusr/device_status").strip() != "READY":
+        raise ValueError("start the phone and wait until it has booted")
+    tmp = DATA / f"upload-{pid}.apk"
+    try:
+        tmp.write_bytes(data)
+        docker("cp", str(tmp), f"endless-{pid}:/tmp/upload.apk", timeout=300)
+        return docker("exec", f"endless-{pid}", "adb", "install", "-r", "-g", "/tmp/upload.apk", timeout=600).strip()
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def ready(p):
@@ -479,6 +498,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(403, {"error": "box passwords can only be set on the computer running EndlessChrome"})
                 set_box_password(m[1], str(self.body().get("password", "")))
                 return self.send(200, {"locked": box_locked(m[1])})
+            m = re.fullmatch(r"/api/profiles/(\w+)/apk", self.path)
+            if m and (PROFILES / m[1] / "profile.json").exists():
+                if load(m[1]).get("kind") != "android" or not self.box_ok(m[1]):
+                    return self.send(403, {"error": "apps can only be installed on an unlocked Android box"})
+                n = int(self.headers.get("Content-Length") or 0)
+                if not 0 < n <= MAX_APK:
+                    return self.send(400, {"error": "send the APK as the request body (max 1 GB)"})
+                try:
+                    return self.send(200, {"output": install_apk(m[1], self.rfile.read(n))})
+                except (ValueError, RuntimeError) as e:  # adb's own message, e.g. INSTALL_FAILED_...
+                    return self.send(400, {"error": str(e)})
             m = re.fullmatch(r"/api/profiles/(\w+)/icon", self.path)
             if m and (PROFILES / m[1] / "profile.json").exists():
                 try:
