@@ -38,15 +38,18 @@
 <script>
 const id = "{{ID}}", msg = document.getElementById("msg"), gone = document.getElementById("gone");
 const api = (path, method = "GET") => fetch(path, { method, headers: { "X-EndlessChrome": "1" } }).then(r => r.json());
-let frame;
+let frame, kind = "browser";
 
 function show(watching) {
   history.replaceState(null, "", watching ? "?watch" : location.pathname);
   gone.hidden = true;
   frame?.remove();
   frame = document.createElement("iframe");
-  // #shared = Selkies' read-only viewer: it never kicks the person in control
-  frame.src = `/v/${id}/${watching ? "#shared" : ""}`;
+  // android: noVNC (shared by default, so several people can control at once; view_only for watchers)
+  // others: #shared = Selkies' read-only viewer, which never kicks the person in control
+  frame.src = kind === "android"
+    ? `/v/${id}/vnc.html?autoconnect=1&reconnect=1&resize=scale&path=v/${id}/websockify${watching ? "&view_only=1" : ""}`
+    : `/v/${id}/${watching ? "#shared" : ""}`;
   frame.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
   document.body.prepend(frame);
   frame.focus();
@@ -67,6 +70,7 @@ document.getElementById("watch").onclick = () => show(true);
 async function boot() {
   let p = await api(`/api/profiles/${id}`);
   if (p.error) { msg.textContent = "This profile no longer exists."; return; }
+  kind = p.kind || "browser";
   if (!p.running) await api(`/api/profiles/${id}/start`, "POST");
   while (!(p = await api(`/api/profiles/${id}`)).ready) await new Promise(r => setTimeout(r, 1000));
   document.getElementById("wait").remove();

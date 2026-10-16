@@ -12,7 +12,8 @@ and icon in your taskbar or dock.
 
 ## Features
 
-- **Two kinds of profile:** *Browser* (one Chromium, ~400 MB) or *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle).
+- **Three kinds of profile:** *Browser* (one Chromium, ~400 MB), *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle)
+  or *Android* (an Android 14 emulator, ~6 GB; needs KVM, which Docker Desktop on Windows 11 provides).
   Think of a Full OS profile as a Linux VM that starts in seconds.
 - **Watch together:** *Copy watch link* in the ⚙ menu gives a read-only live view. Any number of people can watch while one person controls.
 - **Create, clone, rename, recolour, start, stop and delete** profiles from the dashboard (the ⚙ menu on each card).
@@ -69,6 +70,7 @@ Copy `.env.example` to `.env` next to `endlesschrome.py` and edit it, or set the
 | `ENDLESS_USER` | `endless` | Login username |
 | `ENDLESS_PASSWORD` | — | Turns on a login for everything. Required when `ENDLESS_BIND` isn't localhost |
 | `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Image for *Browser* profiles |
+| `ENDLESS_ANDROID_IMAGE` | `budtmo/docker-android:emulator_14.0` | Image for *Android* profiles (needs `/dev/kvm`) |
 | `ENDLESS_OS_IMAGE` | `lscr.io/linuxserver/webtop:ubuntu-xfce` | Image for *Full OS* profiles (any linuxserver webtop tag works, e.g. `ubuntu-kde`) |
 
 ## Using it from anywhere
@@ -98,7 +100,7 @@ with sync_playwright() as pw:
 
 ## Known limits
 
-- **One controller per profile at a time** (a limit of the Selkies streamer). If someone else opens the same profile to control it,
+- **Android boxes can be controlled by several people at once.** Browser and Full OS boxes allow **one controller at a time** (a limit of the Selkies streamer). If someone else opens the same profile to control it,
   the previous controller sees a *You were disconnected* screen and can take control back or watch instead.
   Watch links never disconnect anyone. Anyone with the dashboard login can control, so share the login only with people you trust.
 - On Linux hosts, `cdp-forward` must be owned by root for the container to run it (`sudo chown root cdp-forward`).

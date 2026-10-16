@@ -20,9 +20,10 @@ if (DIR / ".env").exists():  # KEY=VALUE lines; real environment variables win
             os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 DATA = Path(os.environ.get("ENDLESS_DATA", DIR / "data")).resolve()
 PROFILES, SHARED = DATA / "profiles", DATA / "shared"
-KINDS = {  # what a profile runs: same Selkies viewer, /config home and SUBFOLDER support in both images
+KINDS = {  # what a profile runs: browser/os share Selkies + /config; android is an emulator with noVNC
     "browser": os.environ.get("ENDLESS_IMAGE", "lscr.io/linuxserver/chromium:latest"),
     "os": os.environ.get("ENDLESS_OS_IMAGE", "lscr.io/linuxserver/webtop:ubuntu-xfce"),
+    "android": os.environ.get("ENDLESS_ANDROID_IMAGE", "budtmo/docker-android:emulator_14.0"),
 }
 PORT = int(os.environ.get("ENDLESS_PORT", 8790))
 BIND = os.environ.get("ENDLESS_BIND", "127.0.0.1")
@@ -95,12 +96,32 @@ def in_image(image, script, *mounts):
     docker("run", "--rm", *vols, "--entrypoint", "sh", image, "-c", script)
 
 
+def android_volumes(pid):
+    # emulator disks live in docker volumes: fast, and no Windows bind-mount issues with qemu images
+    return [(f"endless-{pid}-emulator", "/home/androidusr/emulator"), (f"endless-{pid}-android", "/home/androidusr/.android")]
+
+
+def android_prepare(p):
+    """New volumes are root-owned; the emulator runs as uid 1300."""
+    vols = [a for i, (v, _) in enumerate(android_volumes(p["id"])) for a in ("-v", f"{v}:/v{i}")]
+    docker("run", "--rm", "-u", "0", *vols, "--entrypoint", "sh", image_of(p), "-c", "chown 1300:1301 /v0 /v1")
+
+
 def start(pid):
     p, home = load(pid), PROFILES / pid / "home"
     pr = p["ports"]
     args = ["run", "-d", "--rm", "--name", f"endless-{pid}", "--label", f"endlesschrome={pid}",
-            "--shm-size=1g", "--hostname", re.sub(r"[^a-z0-9-]", "", p["name"].lower().replace(" ", "-"))[:40] or pid,
-            "-p", f"127.0.0.1:{pr['view']}:3000",
+            "--hostname", re.sub(r"[^a-z0-9-]", "", p["name"].lower().replace(" ", "-"))[:40] or pid]
+    if p.get("kind") == "android":
+        android_prepare(p)
+        args += ["--device", "/dev/kvm", "-p", f"127.0.0.1:{pr['view']}:6080",
+                 "-e", "EMULATOR_DEVICE=Samsung Galaxy S10", "-e", "WEB_VNC=true",
+                 "-e", "EMULATOR_ADDITIONAL_ARGS=-memory 2048"]
+        args += [a for v, path in android_volumes(pid) for a in ("-v", f"{v}:{path}")]
+        if os.environ.get("ENDLESS_TZ"):
+            args += ["-e", f"TZ={os.environ['ENDLESS_TZ']}"]
+        return docker(*args, image_of(p))
+    args += ["--shm-size=1g", "-p", f"127.0.0.1:{pr['view']}:3000",
             "-v", f"{home}:/config", "-v", f"{SHARED}:/config/Shared",
             "-e", f"TITLE={p['name']}", "-e", f"SUBFOLDER=/v/{pid}/"]  # the dashboard proxies the viewer at this path
     if p.get("kind", "browser") == "browser":
@@ -122,7 +143,8 @@ def stop(pid):
         docker("exec", f"endless-{pid}", "sh", "-c",
                "pkill -TERM -o chromium; for i in $(seq 20); do pgrep -x chromium >/dev/null || break; sleep .5; done",
                timeout=30)
-        docker("stop", "-t", "10", f"endless-{pid}", timeout=60)  # --rm removes it
+        # the emulator needs longer to flush its disk images
+        docker("stop", "-t", "30" if load(pid).get("kind") == "android" else "10", f"endless-{pid}", timeout=90)  # --rm removes it
 
 
 def create(name, color=None, clone_of=None, kind="browser"):
@@ -144,8 +166,14 @@ def create(name, color=None, clone_of=None, kind="browser"):
             was_running = clone_of in running_ids()
             stop(clone_of)  # copy a closed profile, not one Chromium is writing to
             try:
-                in_image(image_of(src), "cp -a /src/. /dst/ && rm -f /dst/.config/chromium/Singleton*",
-                         (PROFILES / clone_of / "home", "/src"), (root / "home", "/dst"))
+                if p["kind"] == "android":
+                    android_prepare(p)
+                    (s1, _), (s2, _) = android_volumes(clone_of)
+                    (d1, _), (d2, _) = android_volumes(pid)
+                    in_image(image_of(src), "cp -a /s1/. /d1/ && cp -a /s2/. /d2/", (s1, "/s1"), (s2, "/s2"), (d1, "/d1"), (d2, "/d2"))
+                else:
+                    in_image(image_of(src), "cp -a /src/. /dst/ && rm -f /dst/.config/chromium/Singleton*",
+                             (PROFILES / clone_of / "home", "/src"), (root / "home", "/dst"))
             finally:
                 if was_running:
                     start(clone_of)
@@ -160,12 +188,15 @@ def create(name, color=None, clone_of=None, kind="browser"):
 def delete(pid):
     stop(pid)
     in_image(image_of(load(pid)), "rm -rf /p/home", (PROFILES / pid, "/p"))
+    if load(pid).get("kind") == "android":
+        docker("volume", "rm", "-f", *[v for v, _ in android_volumes(pid)])
     shutil.rmtree(PROFILES / pid)
 
 
 def ready(p):
     try:
-        return urllib.request.urlopen(f"http://127.0.0.1:{p['ports']['view']}/v/{p['id']}/", timeout=2).status == 200
+        path = "/" if p.get("kind") == "android" else f"/v/{p['id']}/"  # noVNC has no subfolder mode
+        return urllib.request.urlopen(f"http://127.0.0.1:{p['ports']['view']}{path}", timeout=2).status == 200
     except OSError:
         return False
 
@@ -276,12 +307,16 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"/v/(\w+)/", self.path)
         if not m or not (PROFILES / m[1] / "profile.json").exists():
             return self.send(404, {"error": "not found"})
+        p = load(m[1])
         try:
-            up = socket.create_connection(("127.0.0.1", load(m[1])["ports"]["view"]), timeout=10)
+            up = socket.create_connection(("127.0.0.1", p["ports"]["view"]), timeout=10)
         except OSError:
             return self.send(502, {"error": "profile is not running"})
         upgrade = self.headers.get("Upgrade", "").lower() == "websocket"
-        head = [f"{self.command} {self.path} HTTP/1.1"] + [
+        # Selkies serves under SUBFOLDER=/v/<id>/; noVNC (android) only serves from /, so strip the prefix
+        path = self.path[len(m[0]) - 1:] if p.get("kind") == "android" else self.path
+        # HTTP/1.0 for plain requests: some servers (noVNC's websockify) ignore "Connection: close" on 1.1
+        head = [f"{self.command} {path} HTTP/{'1.1' if upgrade else '1.0'}"] + [
             f"{k}: {v}" for k, v in self.headers.items() if k.lower() not in ("connection", "keep-alive", "authorization")]
         # one request per upstream connection, so a reused browser connection can't skip this handler
         head.append("Connection: Upgrade" if upgrade else "Connection: close")
@@ -298,6 +333,15 @@ class Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=client_to_container, daemon=True).start()
         try:
+            if not upgrade:
+                # force "Connection: close" on the response: a reused browser connection would skip guard()
+                buf = b""
+                while b"\r\n\r\n" not in buf and (chunk := up.recv(65536)):
+                    buf += chunk
+                hdr, sep, rest = buf.partition(b"\r\n\r\n")
+                lines = [l for l in hdr.split(b"\r\n") if not l.lower().startswith((b"connection:", b"keep-alive:"))]
+                if buf:
+                    self.connection.sendall(b"\r\n".join(lines + [b"Connection: close"]) + sep + rest)
             while data := up.recv(65536):
                 self.connection.sendall(data)
         except OSError:
@@ -357,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "no such profile"})
                 kind = b.get("kind", "browser")
                 if kind not in KINDS:
-                    return self.send(400, {"error": "kind must be browser or os"})
+                    return self.send(400, {"error": "kind must be browser, os or android"})
                 color = b.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get("color", ""))) else None
                 return self.send(201, create(name, color, clone_of, kind))
             m = re.fullmatch(r"/api/profiles/(\w+)/icon", self.path)
