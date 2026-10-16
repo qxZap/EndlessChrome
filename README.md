@@ -15,6 +15,8 @@ and icon in your taskbar or dock.
 - **Three kinds of profile:** *Browser* (one Chromium, ~400 MB), *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle)
   or *Android* (an Android 14 emulator, ~6 GB; needs KVM, which Docker Desktop on Windows 11 provides).
   Think of a Full OS profile as a Linux VM that starts in seconds.
+- **Per-box passwords:** lock any box from the ⚙ menu. Only someone at the computer running EndlessChrome can set one;
+  visitors through a tunnel or the network must enter it (on top of the dashboard login) before they can see or control that box.
 - **Watch together:** *Copy watch link* in the ⚙ menu gives a read-only live view. Any number of people can watch while one person controls.
 - **Create, clone, rename, recolour, start, stop and delete** profiles from the dashboard (the ⚙ menu on each card).
 - **Custom icons:** upload any image. It is cropped square and converted in your browser to a 48 px favicon and 192/512 px app icons. Without an image, a letter icon in the profile colour is generated.

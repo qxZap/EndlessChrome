@@ -7,7 +7,7 @@ python endlesschrome.py --stop-all   close every running profile cleanly
 Env: ENDLESS_PORT (8790), ENDLESS_DATA (./data), ENDLESS_TZ (e.g. Europe/Berlin),
      ENDLESS_USER (endless) + ENDLESS_PASSWORD turn on a login; ENDLESS_BIND + ENDLESS_PASSWORD to reach it from other devices (password required then).
 """
-import base64, html, json, os, random, re, secrets, shutil, socket, subprocess, sys, threading, time, uuid
+import base64, hashlib, hmac, html, http.cookies, json, os, random, re, secrets, shutil, socket, subprocess, sys, threading, time, uuid
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -163,6 +163,8 @@ def create(name, color=None, clone_of=None, kind="browser"):
                 for s in ICON_SIZES:
                     shutil.copy(PROFILES / clone_of / f"icon-{s}.png", root / f"icon-{s}.png")
                 p["icon"] = src["icon"]
+            if box_locked(clone_of):  # a clone of a locked box stays locked
+                shutil.copy(PROFILES / clone_of / "password.json", root / "password.json")
             was_running = clone_of in running_ids()
             stop(clone_of)  # copy a closed profile, not one Chromium is writing to
             try:
@@ -262,6 +264,50 @@ def manifest(p):
             "display": "standalone", "background_color": "#0e0f13", "theme_color": p["color"], "icons": icons}
 
 
+# ---------- per-box passwords (kept out of profile.json so no API response can leak them) ----------
+
+def box_locked(pid):
+    return (PROFILES / pid / "password.json").exists()
+
+
+def pw_hash(pw, salt):
+    return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200_000).hex()
+
+
+def set_box_password(pid, pw):
+    f = PROFILES / pid / "password.json"
+    if not pw:
+        return f.unlink(missing_ok=True)
+    salt = secrets.token_hex(16)
+    f.write_text(json.dumps({"salt": salt, "hash": pw_hash(pw, salt)}), "utf-8")
+
+
+def check_box_password(pid, pw):
+    d = json.loads((PROFILES / pid / "password.json").read_text("utf-8"))
+    return hmac.compare_digest(pw_hash(pw, d["salt"]), d["hash"])
+
+
+def install_secret():
+    f = DATA / "secret"
+    if not f.exists():
+        DATA.mkdir(parents=True, exist_ok=True)
+        f.write_text(secrets.token_hex(32), "utf-8")
+    return f.read_text("utf-8").encode()
+
+
+def box_token(pid):
+    # tied to the stored hash, so changing or removing the password invalidates every unlock cookie
+    return hmac.new(install_secret(), (pid + (PROFILES / pid / "password.json").read_text("utf-8")).encode(),
+                    "sha256").hexdigest()
+
+
+def local_request(client_ip, headers, host_header):
+    """True only for someone sitting at this PC: loopback, no proxy/tunnel headers, local Host."""
+    proxied = any(headers.get(h) for h in ("X-Forwarded-For", "Forwarded", "X-Real-IP", "Cf-Connecting-IP"))
+    host = host_header.rsplit(":", 1)[0]
+    return client_ip in ("127.0.0.1", "::1") and not proxied and host in ("localhost", "127.0.0.1", "[::1]")
+
+
 # ---------- HTTP ----------
 
 def host_ok(host_header):
@@ -273,10 +319,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def send(self, code, body=b"", ctype="application/json"):
+    def send(self, code, body=b"", ctype="application/json", headers=()):
         if not isinstance(body, bytes):
             body = (body if isinstance(body, str) else json.dumps(body)).encode()
         self.send_response(code)
+        for k, v in headers:
+            self.send_header(k, v)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
@@ -300,6 +348,15 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def is_local(self):
+        return local_request(self.client_address[0], self.headers, self.headers.get("Host", ""))
+
+    def box_ok(self, pid):
+        if not box_locked(pid) or self.is_local():
+            return True
+        cookie = http.cookies.SimpleCookie(self.headers.get("Cookie", "")).get(f"ec_box_{pid}")
+        return bool(cookie) and hmac.compare_digest(cookie.value, box_token(pid))
+
     def proxy(self):
         """Relay /v/<id>/... (plain HTTP and the viewer's websocket) to that profile's container."""
         if not self.guard(csrf=False):
@@ -307,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"/v/(\w+)/", self.path)
         if not m or not (PROFILES / m[1] / "profile.json").exists():
             return self.send(404, {"error": "not found"})
+        if not self.box_ok(m[1]):
+            return self.send(403, {"error": "this box is locked"})
         p = load(m[1])
         try:
             up = socket.create_connection(("127.0.0.1", p["ports"]["view"]), timeout=10)
@@ -363,7 +422,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, (DIR / "static" / "index.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/profiles":
             run = running_ids()
-            return self.send(200, {"local": LOCAL, "profiles": [{**p, "running": p["id"] in run} for p in all_profiles()]})
+            return self.send(200, {"local": LOCAL, "local_client": self.is_local(),
+                                   "profiles": [{**p, "running": p["id"] in run, "locked": box_locked(p["id"])}
+                                                for p in all_profiles()]})
         m = re.fullmatch(r"/api/profiles/(\w+)", path)
         if m and (PROFILES / m[1] / "profile.json").exists():
             p = load(m[1])
@@ -378,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, icon_svg(p), "image/svg+xml")
             if m[2]:
                 return self.send(200, manifest(p), "application/manifest+json")
-            page = (DIR / "static" / "app.html").read_text("utf-8")
+            page = (DIR / "static" / ("app.html" if self.box_ok(m[1]) else "unlock.html")).read_text("utf-8")
             for k, v in {"ID": p["id"], "NAME": p["name"], "COLOR": p["color"],
                          "ICON": icon_url(p, "192"), "FAVICON": icon_url(p, "48")}.items():
                 page = page.replace("{{%s}}" % k, html.escape(v))
@@ -404,6 +465,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": "kind must be browser, os or android"})
                 color = b.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get("color", ""))) else None
                 return self.send(201, create(name, color, clone_of, kind))
+            m = re.fullmatch(r"/p/(\w+)/unlock", self.path)
+            if m and box_locked(m[1]):
+                if not check_box_password(m[1], str(self.body().get("password", ""))):
+                    time.sleep(1)  # slows down guessing
+                    return self.send(403, {"error": "wrong password"})
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+                return self.send(200, {"ok": True}, headers=[("Set-Cookie", f"ec_box_{m[1]}={box_token(m[1])}; Path=/; "
+                                                               f"HttpOnly; SameSite=Strict; Max-Age=2592000{secure}")])
+            m = re.fullmatch(r"/api/profiles/(\w+)/password", self.path)
+            if m and (PROFILES / m[1] / "profile.json").exists():
+                if not self.is_local():
+                    return self.send(403, {"error": "box passwords can only be set on the computer running EndlessChrome"})
+                set_box_password(m[1], str(self.body().get("password", "")))
+                return self.send(200, {"locked": box_locked(m[1])})
             m = re.fullmatch(r"/api/profiles/(\w+)/icon", self.path)
             if m and (PROFILES / m[1] / "profile.json").exists():
                 try:
@@ -472,6 +547,13 @@ def selftest():
     assert host_ok("localhost:8790") and host_ok("127.0.0.1:8790") and not host_ok("evil.com:8790")
     PASSWORD = "x"
     assert host_ok("abc.ngrok-free.dev")  # with a login, tunnel hosts are allowed
+    h = {"X-Forwarded-For": "1.2.3.4"}
+    assert local_request("127.0.0.1", {}, "localhost:8790")
+    assert not local_request("127.0.0.1", h, "localhost:8790")  # arrived through a tunnel
+    assert not local_request("127.0.0.1", {}, "abc.ngrok-free.dev")
+    assert not local_request("192.168.1.5", {}, "localhost:8790")
+    salt = secrets.token_hex(16)
+    assert pw_hash("hunter2", salt) == pw_hash("hunter2", salt) != pw_hash("hunter3", salt)
     a = alloc_ports(3)
     assert len(set(a)) == 3 and all(port_free(x) for x in a)
     print("selftest ok")
