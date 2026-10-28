@@ -20,11 +20,13 @@ if (DIR / ".env").exists():  # KEY=VALUE lines; real environment variables win
             os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 DATA = Path(os.environ.get("ENDLESS_DATA", DIR / "data")).resolve()
 PROFILES, SHARED = DATA / "profiles", DATA / "shared"
-KINDS = {  # what a profile runs: browser/os share Selkies + /config; android is an emulator with noVNC
+KINDS = {  # what a profile runs: browser/os share Selkies + /config; android and windows are KVM machines with noVNC
     "browser": os.environ.get("ENDLESS_IMAGE", "lscr.io/linuxserver/chromium:latest"),
     "os": os.environ.get("ENDLESS_OS_IMAGE", "lscr.io/linuxserver/webtop:ubuntu-xfce"),
     "android": os.environ.get("ENDLESS_ANDROID_IMAGE", "budtmo/docker-android:emulator_14.0"),
+    "windows": os.environ.get("ENDLESS_WINDOWS_IMAGE", "dockurr/windows:latest"),
 }
+NOVNC_KINDS = ("android", "windows")  # viewer served from / (no subfolder mode), so the relay strips /v/<id>
 PORT = int(os.environ.get("ENDLESS_PORT", 8790))
 BIND = os.environ.get("ENDLESS_BIND", "127.0.0.1")
 LOCAL = BIND in ("127.0.0.1", "localhost")
@@ -96,14 +98,15 @@ def in_image(image, script, *mounts):
     docker("run", "--rm", *vols, "--entrypoint", "sh", image, "-c", script)
 
 
-def android_volumes(pid):
-    # emulator disks live in docker volumes: fast, and no Windows bind-mount issues with qemu images
-    return [(f"endless-{pid}-emulator", "/home/androidusr/emulator"), (f"endless-{pid}-android", "/home/androidusr/.android")]
+def box_volumes(pid, kind):
+    # emulator/VM disks live in docker volumes: fast, and no Windows bind-mount issues with qemu images
+    return {"android": [(f"endless-{pid}-emulator", "/home/androidusr/emulator"), (f"endless-{pid}-android", "/home/androidusr/.android")],
+            "windows": [(f"endless-{pid}-windows", "/storage")]}.get(kind, [])
 
 
 def android_prepare(p):
     """New volumes are root-owned; the emulator runs as uid 1300."""
-    vols = [a for i, (v, _) in enumerate(android_volumes(p["id"])) for a in ("-v", f"{v}:/v{i}")]
+    vols = [a for i, (v, _) in enumerate(box_volumes(p["id"], "android")) for a in ("-v", f"{v}:/v{i}")]
     docker("run", "--rm", "-u", "0", *vols, "--entrypoint", "sh", image_of(p), "-c", "chown 1300:1301 /v0 /v1")
 
 
@@ -118,9 +121,15 @@ def start(pid):
         args += ["--device", "/dev/kvm", "-p", f"127.0.0.1:{pr['view']}:6080", "-p", f"127.0.0.1:{pr['cdp']}:5555",
                  "-e", "EMULATOR_DEVICE=Samsung Galaxy S10", "-e", "WEB_VNC=true",
                  "-e", "EMULATOR_ADDITIONAL_ARGS=-memory 2048"]
-        args += [a for v, path in android_volumes(pid) for a in ("-v", f"{v}:{path}")]
+        args += [a for v, path in box_volumes(pid, "android") for a in ("-v", f"{v}:{path}")]
         if os.environ.get("ENDLESS_TZ"):
             args += ["-e", f"TZ={os.environ['ENDLESS_TZ']}"]
+        return docker(*args, image_of(p))
+    if p.get("kind") == "windows":
+        # dockur/windows: the first start downloads and installs Windows 11 into /storage (~20 min)
+        args += ["--device", "/dev/kvm", "--device", "/dev/net/tun", "--cap-add", "NET_ADMIN",
+                 "-p", f"127.0.0.1:{pr['view']}:8006"]
+        args += [a for v, path in box_volumes(pid, "windows") for a in ("-v", f"{v}:{path}")]
         return docker(*args, image_of(p))
     args += ["--shm-size=1g", "-p", f"127.0.0.1:{pr['view']}:3000",
             "-v", f"{home}:/config", "-v", f"{SHARED}:/config/Shared",
@@ -144,8 +153,9 @@ def stop(pid):
         docker("exec", f"endless-{pid}", "sh", "-c",
                "pkill -TERM -o chromium; for i in $(seq 20); do pgrep -x chromium >/dev/null || break; sleep .5; done",
                timeout=30)
-        # the emulator needs longer to flush its disk images
-        docker("stop", "-t", "30" if load(pid).get("kind") == "android" else "10", f"endless-{pid}", timeout=90)  # --rm removes it
+        # the emulator needs longer to flush its disk images; windows gets an ACPI shutdown, which can take minutes
+        t = {"android": 30, "windows": 120}.get(load(pid).get("kind"), 10)
+        docker("stop", "-t", str(t), f"endless-{pid}", timeout=t + 60)  # --rm removes it
 
 
 def create(name, color=None, clone_of=None, kind="browser"):
@@ -169,11 +179,13 @@ def create(name, color=None, clone_of=None, kind="browser"):
             was_running = clone_of in running_ids()
             stop(clone_of)  # copy a closed profile, not one Chromium is writing to
             try:
-                if p["kind"] == "android":
-                    android_prepare(p)
-                    (s1, _), (s2, _) = android_volumes(clone_of)
-                    (d1, _), (d2, _) = android_volumes(pid)
-                    in_image(image_of(src), "cp -a /s1/. /d1/ && cp -a /s2/. /d2/", (s1, "/s1"), (s2, "/s2"), (d1, "/d1"), (d2, "/d2"))
+                if box_volumes(pid, p["kind"]):
+                    if p["kind"] == "android":
+                        android_prepare(p)
+                    pairs = list(zip(box_volumes(clone_of, p["kind"]), box_volumes(pid, p["kind"])))
+                    mounts = [m for i, ((s, _), (d, _)) in enumerate(pairs) for m in ((s, f"/s{i}"), (d, f"/d{i}"))]
+                    # --sparse=always: the windows disk is a 64 GB sparse file, mostly holes
+                    in_image(image_of(src), " && ".join(f"cp -a --sparse=always /s{i}/. /d{i}/" for i in range(len(pairs))), *mounts)
                 else:
                     in_image(image_of(src), "cp -a /src/. /dst/ && rm -f /dst/.config/chromium/Singleton*",
                              (PROFILES / clone_of / "home", "/src"), (root / "home", "/dst"))
@@ -191,8 +203,8 @@ def create(name, color=None, clone_of=None, kind="browser"):
 def delete(pid):
     stop(pid)
     in_image(image_of(load(pid)), "rm -rf /p/home", (PROFILES / pid, "/p"))
-    if load(pid).get("kind") == "android":
-        docker("volume", "rm", "-f", *[v for v, _ in android_volumes(pid)])
+    if vols := box_volumes(pid, load(pid).get("kind")):
+        docker("volume", "rm", "-f", *[v for v, _ in vols])
     shutil.rmtree(PROFILES / pid)
 
 
@@ -216,7 +228,7 @@ def install_apk(pid, data):
 
 def ready(p):
     try:
-        path = "/" if p.get("kind") == "android" else f"/v/{p['id']}/"  # noVNC has no subfolder mode
+        path = "/" if p.get("kind") in NOVNC_KINDS else f"/v/{p['id']}/"  # noVNC has no subfolder mode
         return urllib.request.urlopen(f"http://127.0.0.1:{p['ports']['view']}{path}", timeout=2).status == 200
     except OSError:
         return False
@@ -391,8 +403,8 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self.send(502, {"error": "profile is not running"})
         upgrade = self.headers.get("Upgrade", "").lower() == "websocket"
-        # Selkies serves under SUBFOLDER=/v/<id>/; noVNC (android) only serves from /, so strip the prefix
-        path = self.path[len(m[0]) - 1:] if p.get("kind") == "android" else self.path
+        # Selkies serves under SUBFOLDER=/v/<id>/; noVNC (android, windows) only serves from /, so strip the prefix
+        path = self.path[len(m[0]) - 1:] if p.get("kind") in NOVNC_KINDS else self.path
         # HTTP/1.0 for plain requests: some servers (noVNC's websockify) ignore "Connection: close" on 1.1
         head = [f"{self.command} {path} HTTP/{'1.1' if upgrade else '1.0'}"] + [
             f"{k}: {v}" for k, v in self.headers.items() if k.lower() not in ("connection", "keep-alive", "authorization")]
@@ -481,7 +493,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "no such profile"})
                 kind = b.get("kind", "browser")
                 if kind not in KINDS:
-                    return self.send(400, {"error": "kind must be browser, os or android"})
+                    return self.send(400, {"error": "kind must be browser, os, android or windows"})
                 color = b.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get("color", ""))) else None
                 return self.send(201, create(name, color, clone_of, kind))
             m = re.fullmatch(r"/p/(\w+)/unlock", self.path)
@@ -584,6 +596,8 @@ def selftest():
     assert not local_request("192.168.1.5", {}, "localhost:8790")
     salt = secrets.token_hex(16)
     assert pw_hash("hunter2", salt) == pw_hash("hunter2", salt) != pw_hash("hunter3", salt)
+    assert box_volumes("abc", "windows") == [("endless-abc-windows", "/storage")] and len(box_volumes("abc", "android")) == 2
+    assert box_volumes("abc", "browser") == [] and set(NOVNC_KINDS) <= set(KINDS)
     a = alloc_ports(3)
     assert len(set(a)) == 3 and all(port_free(x) for x in a)
     print("selftest ok")

@@ -17,13 +17,18 @@ Notes for AI coding agents working on EndlessChrome. Read README.md first for wh
 ## Rules that matter
 
 - Android profiles (`kind: android`) run budtmo/docker-android with `--device /dev/kvm`; their disks live in the docker volumes from
-  `android_volumes()` (chowned to uid 1300 by `android_prepare()`), and noVNC is served from `/`, so `proxy()` strips `/v/<id>`.
+  `box_volumes()` (chowned to uid 1300 by `android_prepare()`), and noVNC is served from `/`, so `proxy()` strips `/v/<id>`.
+- Windows profiles (`kind: windows`) run dockurr/windows with `/dev/kvm`, `/dev/net/tun` and `NET_ADMIN`; the disk lives in the docker
+  volume from `box_volumes()` (`/storage`). Port 8006 serves install progress at `/` (plus a `/status` websocket), then the same URL
+  becomes noVNC (`/websockify`), so it is in `NOVNC_KINDS` and `app.html` loads `/v/<id>/?path=websockify`. Its newer noVNC resolves `path`
+  relative to the page (android's from the root), and noVNC stores `path` in localStorage per origin, so always pass it. `stop()` gives it 120 s for an ACPI shutdown.
+- Clone copies `box_volumes()` with `cp -a --sparse=always` (the Windows disk is a 64 GB sparse file); delete removes them.
 - Android boxes publish ADB on `ports.cdp` (127.0.0.1 only). `install_apk()` copies the upload in and runs `adb install -r -g`.
 - `proxy()` forces `Connection: close` on plain responses: a reused browser connection would bypass routing and `guard()`.
 - Box passwords: PBKDF2 hash in `data/profiles/<id>/password.json` (never in profile.json, which API responses return raw).
   `box_ok()` guards `/p/<id>/` and the `/v/<id>/` relay; unlock sets an HMAC cookie tied to the stored hash, so a password
   change revokes it. Setting a password requires `local_request()` (loopback, local Host, no proxy headers) — keep that check.
-- Profiles have a `kind` (`browser` default, `os`, or `android`). Chromium-only bits (CDP port, `cdp-forward`, `policies/`, `CHROME_CLI`)
+- Profiles have a `kind` (`browser` default, `os`, `android` or `windows`). Chromium-only bits (CDP port, `cdp-forward`, `policies/`, `CHROME_CLI`)
   are applied only to browsers; `image_of(p)` picks the image.
 - `static/app.html` watches the iframe for Selkies' "Connection Terminated" text to show the disconnected screen; `?watch` loads
   Selkies' read-only `#shared` mode.

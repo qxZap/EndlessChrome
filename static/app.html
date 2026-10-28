@@ -45,10 +45,14 @@ function show(watching) {
   gone.hidden = true;
   frame?.remove();
   frame = document.createElement("iframe");
-  // android: noVNC (shared by default, so several people can control at once; view_only for watchers)
+  // android/windows: noVNC (shared by default, so several people can control at once; view_only for watchers)
+  // windows loads / because it shows the install progress there, then reloads the same URL as noVNC
   // others: #shared = Selkies' read-only viewer, which never kicks the person in control
-  frame.src = kind === "android"
-    ? `/v/${id}/vnc.html?autoconnect=1&reconnect=1&resize=scale&path=v/${id}/websockify${watching ? "&view_only=1" : ""}`
+  // path must always be passed: noVNC remembers it in localStorage, shared by every box on this origin.
+  // android's noVNC resolves it from the site root, dockur's newer one relative to the page.
+  const vnc = `autoconnect=1&reconnect=1&resize=scale${watching ? "&view_only=1" : ""}&path=`;
+  frame.src = kind === "android" ? `/v/${id}/vnc.html?${vnc}v/${id}/websockify`
+    : kind === "windows" ? `/v/${id}/?${vnc}websockify`
     : `/v/${id}/${watching ? "#shared" : ""}`;
   frame.allow = "clipboard-read; clipboard-write; fullscreen; autoplay; microphone; camera; gamepad; keyboard-map; screen-wake-lock";
   document.body.prepend(frame);

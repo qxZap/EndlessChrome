@@ -69,7 +69,7 @@
   label, .field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
   input[type=text] { font: inherit; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
   input[type=color] { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding: 2px; }
-  .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .kinds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kind { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; color: var(--text); }
   .kind:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .kind:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -107,6 +107,8 @@
           <b>Full OS</b><span>A whole Ubuntu desktop with apps. About 300 MB idle.</span></label>
         <label class="kind"><input type="radio" name="kind" value="android">
           <b>Android</b><span>An Android 14 phone. Heavy, about 6 GB. Several people can control it at once.</span></label>
+        <label class="kind"><input type="radio" name="kind" value="windows">
+          <b>Windows</b><span>A Windows 11 PC. Heaviest: 4 GB RAM, up to 64 GB disk. First start installs it (~20 min).</span></label>
       </div>
     </div>
     <label>Name <input type="text" id="f-name" required maxlength="60" autocomplete="off"></label>
@@ -195,13 +197,15 @@ function card(p) {
       <img class="avatar" src="${iconUrl(p)}" alt="">
       <div class="who">
         <div class="name"></div>
-        <div class="status ${p.running ? "on" : ""}"><span class="dot"></span>${b ? "Working…" : p.running ? "Running" : "Stopped"} · ${{ os: "Full OS", android: "Android" }[p.kind] || "Browser"}${p.locked ? " · 🔒 Locked" : ""}</div>
+        <div class="status ${p.running ? "on" : ""}"><span class="dot"></span>${b ? "Working…" : p.running ? "Running" : "Stopped"} · ${{ os: "Full OS", android: "Android", windows: "Windows" }[p.kind] || "Browser"}${p.locked ? " · 🔒 Locked" : ""}</div>
       </div>
       <button class="gear" aria-label="Profile settings" aria-haspopup="menu" aria-expanded="${openMenu === p.id}">${ICONS.gear}</button>
     </div>
     <button class="primary open">Open</button>
     ${p.kind === "android" ? `<div class="hint">Install apps from the ⚙ menu, or deploy from Android Studio after
-      <code>adb connect 127.0.0.1:${p.ports.cdp}</code> on this computer. Phone storage stays inside the box; Clone and Delete include it.</div>` : `<div class="folders-label">Folders</div>
+      <code>adb connect 127.0.0.1:${p.ports.cdp}</code> on this computer. Phone storage stays inside the box; Clone and Delete include it.</div>`
+    : p.kind === "windows" ? `<div class="hint">The first start downloads and installs Windows 11 (about 20 minutes); progress shows in the box.
+      Windows storage stays inside the box; Clone and Delete include it.</div>` : `<div class="folders-label">Folders</div>
     <div class="folders">${["Downloads", "Documents", "Shared"].map(f =>
       `<button class="folder" data-f="${f}" title="${FOLDER_HELP[f]}">${ICONS.folder}${f}</button>`).join("")}</div>
     <div class="hint">Shared is the same folder in every profile.</div>`}

@@ -12,8 +12,10 @@ and icon in your taskbar or dock.
 
 ## Features
 
-- **Three kinds of profile:** *Browser* (one Chromium, ~400 MB), *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle)
-  or *Android* (an Android 14 emulator, ~6 GB; needs KVM, which Docker Desktop on Windows 11 provides).
+- **Four kinds of profile:** *Browser* (one Chromium, ~400 MB), *Full OS* (an Ubuntu XFCE desktop with `apt`, ~300 MB idle),
+  *Android* (an Android 14 emulator, ~6 GB) or *Windows* (a Windows 11 VM via [dockur/windows](https://github.com/dockur/windows):
+  4 GB RAM, up to 64 GB disk; the first start downloads and installs Windows, about 20 minutes). Android and Windows need KVM,
+  which Docker Desktop on Windows 11 and any Linux host with `/dev/kvm` provide.
   Think of a Full OS profile as a Linux VM that starts in seconds.
 - **Install and test Android apps:** ⚙ → *Install app (APK)…* on an Android box, or deploy from Android Studio after
   `adb connect 127.0.0.1:<port>` (the port is shown on the card; it only listens on this computer).
@@ -75,6 +77,7 @@ Copy `.env.example` to `.env` next to `endlesschrome.py` and edit it, or set the
 | `ENDLESS_PASSWORD` | — | Turns on a login for everything. Required when `ENDLESS_BIND` isn't localhost |
 | `ENDLESS_IMAGE` | `lscr.io/linuxserver/chromium:latest` | Image for *Browser* profiles |
 | `ENDLESS_ANDROID_IMAGE` | `budtmo/docker-android:emulator_14.0` | Image for *Android* profiles (needs `/dev/kvm`) |
+| `ENDLESS_WINDOWS_IMAGE` | `dockurr/windows:latest` | Image for *Windows* profiles (needs `/dev/kvm` and `/dev/net/tun`) |
 | `ENDLESS_OS_IMAGE` | `lscr.io/linuxserver/webtop:ubuntu-xfce` | Image for *Full OS* profiles (any linuxserver webtop tag works, e.g. `ubuntu-kde`) |
 
 ## Using it from anywhere
@@ -104,7 +107,7 @@ with sync_playwright() as pw:
 
 ## Known limits
 
-- **Android boxes can be controlled by several people at once.** Browser and Full OS boxes allow **one controller at a time** (a limit of the Selkies streamer). If someone else opens the same profile to control it,
+- **Android and Windows boxes can be controlled by several people at once.** Browser and Full OS boxes allow **one controller at a time** (a limit of the Selkies streamer). If someone else opens the same profile to control it,
   the previous controller sees a *You were disconnected* screen and can take control back or watch instead.
   Watch links never disconnect anyone. Anyone with the dashboard login can control, so share the login only with people you trust.
 - On Linux hosts, `cdp-forward` must be owned by root for the container to run it (`sudo chown root cdp-forward`).
