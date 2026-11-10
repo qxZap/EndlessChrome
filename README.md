@@ -27,6 +27,7 @@ and icon in your taskbar or dock.
 - **One app per profile:** open a profile and install it from Chrome's address bar. It gets its own window and icon.
 - **Real folders on your disk:** each profile's `Downloads` and `Documents` are ordinary folders on your computer,
   and a `Shared` folder is mounted into every profile.
+- **Tabs come back:** a browser profile reopens the tabs it had when it was stopped.
 - **Ad blocking:** uBlock Origin Lite is force-installed in every profile. Delete `policies/` to turn it off.
 - **Automation-ready:** each profile exposes Chrome DevTools Protocol on `127.0.0.1` for Playwright or Puppeteer.
 - **No build step, no dependencies:** one Python file using only the standard library, plus Docker.

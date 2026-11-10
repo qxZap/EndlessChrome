@@ -36,7 +36,7 @@ FIRST_PORT = 23100
 FOLDERS = ("Downloads", "Documents", "Shared")
 ICON_SIZES = ("48", "192", "512")  # favicon, app icon, splash/store icon
 PALETTE = ["#4f7cff", "#ff6b4f", "#22b07d", "#b55cff", "#ffb020", "#ff4f9a", "#14a8c4", "#7a8b99"]
-lock = threading.Lock()
+lock = threading.RLock()  # create() restarts a clone source while holding it
 
 
 # ---------- profiles (profile.json is the source of truth, docker only says what runs) ----------
@@ -112,6 +112,11 @@ def android_prepare(p):
 
 def start(pid):
     p, home = load(pid), PROFILES / pid / "home"
+    with lock:
+        # Hyper-V/WinNAT reserves new port ranges after reboots; a stored port can become unbindable, so move it
+        if not all(map(port_free, p["ports"].values())):
+            p["ports"] = dict(zip(p["ports"], alloc_ports(len(p["ports"]))))
+            save(p)
     pr = p["ports"]
     args = ["run", "-d", "--rm", "--name", f"endless-{pid}", "--label", f"endlesschrome={pid}",
             "--hostname", re.sub(r"[^a-z0-9-]", "", p["name"].lower().replace(" ", "-"))[:40] or pid]
@@ -137,7 +142,7 @@ def start(pid):
     if p.get("kind", "browser") == "browser":
         args += ["-p", f"127.0.0.1:{pr['cdp']}:9223",
                  "-v", f"{DIR / 'cdp-forward'}:/custom-services.d/cdp-forward:ro",
-                 "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble"]
+                 "-e", "CHROME_CLI=--remote-debugging-port=9222 --hide-crash-restore-bubble --restore-last-session"]  # tabs come back on every start
         if (DIR / "policies").is_dir():
             args += ["-v", f"{DIR / 'policies'}:/etc/chromium/policies/managed:ro"]
     if os.environ.get("ENDLESS_TZ"):
